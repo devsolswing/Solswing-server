@@ -1,0 +1,763 @@
+ due —
+  // it wins over the live chain fields, so a settle retried after a NEW
+  // match has started still settles the match it actually belongs to.
+  var ms=(ctx&&ctx.matchState)?new solanaWeb3.PublicKey(ctx.matchState):chain.matchState;
+  var v=(ctx&&ctx.vault)?new solanaWeb3.PublicKey(ctx.vault):chain.vault;
+  var winnerKey=(ctx&&ctx.winnerKey)?new solanaWeb3.PublicKey(ctx.winnerKey):((winnerId===1) ? chain.playerKey : chain.botKey.publicKey);
+  var feeKey=new solanaWeb3.PublicKey(TREASURY_PUBKEY); // the program's locked fee receiver — account key only, never displayed
+  return new solanaWeb3.TransactionInstruction({
+    programId:pid,
+    keys:[
+      { pubkey:ms, isSigner:false, isWritable:true },
+      { pubkey:v, isSigner:false, isWritable:true },
+      { pubkey:winnerKey, isSigner:false, isWritable:true },
+      { pubkey:feeKey, isSigner:false, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:true, isWritable:false } // adjudicator signs
+    ],
+    data:ixData(DISC.settle_match, [new Uint8Array([winnerId])])
+  });
+}
+function setMmSettle(html){ var el=$('mm-settle'); if(el) el.innerHTML=html; }
+// settle_match — the adjudicator (your wallet) signs; the program itself
+// pays 94% to the winner and 6% to the locked treasury. Retry by tapping
+// the Settlement row in the match popup if the signature was declined.
+async function chainDoSettle(){
+  var ps=chain.pendingSettle; if(!ps || chain.settleSig || chain.settleBusy) return;
+  if(!realMode()){ setMmSettle('⚠ Connect your wallet to sign the settlement — the pot stays locked on-chain until you do.'); return; }
+  if(!treasuryLockOk()){ setMmSettle('⛔ Treasury lock check failed — settlement refused.'); return; }
+  chain.settleBusy=true;
+  setMmSettle('⏳ Settling on-chain — approve in Phantom…');
+  try{
+    var sig=await phantomSend([buildSettleIx(ps.winnerId, ps.accounts)]);
+    chain.settleSig=sig; chain.lastTx=sig; chain.pendingSettle=null;
+    setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(sig)+'" target="_blank" rel="noopener">tx '+shortSig(sig)+' ↗</a>');
+    log('[chain] settle_match confirmed · winner paid 94% · treasury fee 6% · tx '+shortSig(sig),'winlog');
+    refreshBalance().then(updateFaucetNote);
+  }catch(e){
+    setMmSettle('⚠ Settlement not signed — tap here to retry.');
+    log('[chain] settle_match not completed · the pot stays locked in the vault until settled','ruglog');
+  }
+  chain.settleBusy=false;
+}
+var wins=0, losses=0, level=1, roundNo=1;
+var active=false, rugged=false, tickTimer=null, rugTimer=null, botTimer=null, resolveTimer=null;
+var startAt=0, rugAt=0, rugStamp=0, youMs=null, botMs=null;
+var matchEndTimer=null; // legacy post-match handle — match end is now instant (disconnectSession), this stays cleared
+var telMatch={you:[],opp:[]}, roundTel=null, oppSnap=false, oppSnapMs=30; // per-round input timing records + opponent pace profile
+
+function wager(){ return Math.max(0.01, parseFloat($('wager').value)||0.1); }
+// The wager selector locks the moment a stake flow begins (pre-game or
+// matchmaking countdown, queue, signing) and stays locked until the match
+// ends or the flow aborts — the amount being played for can never change
+// mid-flight, so the pot lines and the payout math always match the stake
+// that was actually signed.
+function lockWager(lock){ var s=$('wager'); if(s) s.disabled=!!lock; }
+function fmt(n,d){ return n.toFixed(d==null?3:d); }
+function updatePot(){
+  var w=wager(), pot=w*2;
+  $('pot-line').textContent=fmt(pot)+' SOL'; $('win-line').textContent=fmt(pot*0.94)+' SOL'; $('fee-line').textContent=fmt(pot*0.06)+' SOL';
+  updateHUD();
+  if(typeof updateFaucetNote==='function') updateFaucetNote();
+}
+$('wager').addEventListener('input',updatePot); $('wager').addEventListener('change',updatePot); updatePot();
+
+function log(msg, cls){
+  var el=$('log'); if(!el) return; var t=new Date().toLocaleTimeString([], {hour12:false});
+  var div=document.createElement('div'); if(cls) div.className=cls;
+  div.innerHTML='<span class="t">['+t+']</span> '+msg; el.appendChild(div); el.scrollTop=el.scrollHeight;
+}
+function dots(){
+  function render(id, n, isLoss){ var c=$(id); if(!c) return; c.innerHTML=''; for(var i=0;i<2;i++){ var s=document.createElement('span'); s.className='dot'+(i<n?(isLoss?' loss':' win'):''); c.appendChild(s);} }
+  render('dots-you', wins, false); render('dots-bot', losses, true);
+  updateHUD();
+}
+function setStatus(t){ $('status').textContent=t; }
+function botRange(){ return [250,650]; } // default opponent reaction — no selector, fixed internally
+
+function clearTimers(){ [tickTimer,rugTimer,botTimer,resolveTimer].forEach(function(x){ if(x){clearInterval(x); clearTimeout(x);} }); tickTimer=rugTimer=botTimer=resolveTimer=null; }
+
+function startRound(){
+  clearTimers(); if(matchEndTimer){ clearTimeout(matchEndTimer); matchEndTimer=null; } // a new match cancels the post-match lobby trip
+  wins>=2||losses>=2 ? (wins=0,losses=0,dots()) : null;
+  lockWager(true); // the stake is committed from here to match end — the selector cannot move under a live match
+  if(wins===0&&losses===0&&matchWager===null){ matchWager=(matchMode==='pvp'&&mmWager!==null)?mmWager:wager(); statsWagered+=matchWager; telMatch={you:[],opp:[]}; } // PvP plays for the LOCKED mmWager, never whatever the selector happens to show now
+  active=true; rugged=false; youMs=null; botMs=null; roundTel={events:[], moves:0};
+  $('btn-start').classList.add('hidden'); var sell=$('btn-sell'); sell.classList.remove('hidden'); sell.disabled=true;
+  $('rug').classList.remove('active'); $('bars').innerHTML='';
+  var delay=4000+Math.random()*5000; startAt=Date.now(); rugAt=startAt+delay;
+  // Chart + bonding curve are FULLY decoupled from the rug timer, and the
+  // meter has NO ending position: it starts at a random spot and wanders
+  // with zero-drift steps plus a soft pull away from the edges, so it never
+  // fills up, never pins at a cap, and freezes wherever it happens to be
+  // when the rug lands. Nothing about it hints at the rug moment.
+  var curveLevel=10+Math.random()*50, simCap=5000, prevCap=5000;
+  $('curve-fill').style.width=curveLevel+'%'; $('curve-pct').textContent=Math.round(curveLevel)+'%';
+  log('[server] round '+roundNo+' started · rug scheduled (secret) · pot '+fmt(wager()*2)+' SOL');
+  setStatus('Pump in progress… wait for the dev rug!');
+  tickTimer=setInterval(function(){
+    var step=(Math.random()*11-5.5); // zero-drift: wanders up AND down
+    if(curveLevel>74) step-=2.6; else if(curveLevel<14) step+=2.6; // soft pull off the edges — never pins
+    curveLevel=Math.max(2,Math.min(96,curveLevel+step));
+    simCap=Math.max(4200,simCap+Math.round(Math.random()*2600-550));
+    var dipped=simCap<prevCap; prevCap=simCap;
+    $('curve-fill').style.width=curveLevel+'%'; $('curve-pct').textContent=Math.round(curveLevel)+'%';
+    var bar=document.createElement('div'); bar.className='candle'+(dipped?' red':''); bar.style.height=Math.max(8,Math.min(100,curveLevel+(Math.random()*16-8)))+'%'; var bars=$('bars'); bars.appendChild(bar);
+    if(bars.children.length>28) bars.removeChild(bars.firstChild);
+  },150);
+  rugTimer=setTimeout(doRug, delay);
+}
+function doRug(){
+  if(!active) return; clearInterval(tickTimer); rugged=true; rugStamp=Date.now();
+  // Meter is NOT reset: it freezes at its random position — no ending position.
+  $('rug').classList.add('active'); $('btn-sell').disabled=false; setStatus('SMASH SELL NOW!');
+  log('[server] RUG broadcast · serverTime='+rugStamp,'ruglog');
+  var r=botRange(), lat=oppSnap ? oppSnapMs+(Math.random()*3-1.5) : r[0]+Math.random()*(r[1]-r[0]); botMs=Math.round(lat);
+  botTimer=setTimeout(function(){ if(active&&rugged) finishRound('bot'); }, lat);
+  resolveTimer=setTimeout(function(){ if(active&&rugged) finishRound(youMs!=null?'you':'bot'); },5000);
+}
+function sell(){
+  if(!active||!rugged||youMs!=null) return;
+  youMs=Date.now()-rugStamp; $('btn-sell').disabled=true;
+  log('[client→server] sell · server received +'+youMs+'ms');
+  finishRound('you');
+}
+// ---------- Between-rounds countdown: 5s overlay, then the next round auto-starts ----------
+// Runs ONLY between rounds (match not decided). It is purely visual: the
+// score (dots / chart chip, already updated by finishRound) is untouched.
+// If the player leaves the game screen mid-countdown it cancels
+// and hands the Queue button back instead of starting a round off-screen.
+var countdownTimer=null, countdownDeadline=0;
+function hideRoundCountdown(restoreQueue){
+  if(countdownTimer){ clearInterval(countdownTimer); countdownTimer=null; }
+  var ov=$('round-countdown'); if(ov) ov.classList.remove('open');
+  if(restoreQueue) $('btn-start').classList.remove('hidden');
+}
+function showRoundCountdown(){
+  var ov=$('round-countdown'); if(!ov) return;
+  $('btn-start').classList.add('hidden'); // no manual queue while the countdown runs
+  $('cd-round-label').textContent='ROUND '+roundNo+' STARTS IN';
+  $('cd-result').textContent=$('status').textContent; // the round result, readable over the overlay
+  $('cd-score').textContent='Score · You '+wins+' – '+losses+' '+oppShort;
+  ov.classList.add('open');
+  countdownDeadline=Date.now()+5000;
+  var numEl=$('cd-num');
+  function tick(){
+    if(!$('screen-game').classList.contains('active')||!walletConnected){ hideRoundCountdown(true); return; } // left the screen OR the wallet dropped mid-countdown — never start a round into a void (the pre-game and matchmaking countdowns already guard both)
+    var remain=Math.ceil((countdownDeadline-Date.now())/1000);
+    if(remain<=0){ hideRoundCountdown(false); startRound(); return; }
+    if(numEl.textContent!==String(remain)){ numEl.textContent=remain; numEl.classList.remove('pop'); void numEl.offsetWidth; numEl.classList.add('pop'); }
+  }
+  tick();
+  countdownTimer=setInterval(tick,200);
+}
+
+// ---------- Pre-game countdown: 5s overlay after Join Game / Queue Match,
+// before round 1. NO SOL is committed while it runs — the stake signature
+// (proceedToStake) fires only when the countdown reaches zero AND the
+// player is still connected. Disconnect Wallet cancels the countdown,
+// disconnects, and returns the player to the lobby with nothing committed.
+var pregameTimer=null, pregameDeadline=0, pregameActive=false;
+function cancelPregameCountdown(keepLock){
+  if(pregameTimer){ clearInterval(pregameTimer); pregameTimer=null; }
+  pregameActive=false;
+  var ov=$('pregame-countdown'); if(ov) ov.classList.remove('open');
+  $('btn-start').classList.remove('hidden'); // hand the Queue button back on every cancel path (proceedToStake re-hides it when the countdown completes)
+  if(!keepLock) lockWager(false); // abort paths free the selector; the proceed path keeps it locked into the match (startRound owns it from there)
+}
+function startPregameCountdown(){
+  var ov=$('pregame-countdown'); if(!ov||pregameActive) return;
+  pregameActive=true;
+  oppName='Swing Bot'; oppShort='Bot'; oppSnap=false; // bot matches always face the Swing Bot
+  if(realMode()){ ensureBot(); chain.botReady=fundBot(Math.round(wager()*1e9)+100000).catch(function(){ return false; }); } // warm up the bot's faucet funding during the countdown
+  var clbl=$('chart-score-label'); if(clbl) clbl.textContent='Match score · You – Bot';
+  $('btn-start').classList.add('hidden'); // no double-queue while the countdown runs
+  lockWager(true); // the amount on this countdown is the amount that gets staked — the selector locks with it
+  $('pg-wager').textContent='WAGER '+fmt(wager())+' SOL · BEST OF 3 · VS SWING BOT';
+  ov.classList.add('open');
+  pregameDeadline=Date.now()+5000;
+  var numEl=$('pg-num');
+  function tick(){
+    if(!pregameActive) return;
+    if(!$('screen-game').classList.contains('active')||!walletConnected){ cancelPregameCountdown(); $('btn-start').classList.remove('hidden'); return; } // player backed out — nothing proceeds, nothing is signed
+    var remain=Math.ceil((pregameDeadline-Date.now())/1000);
+    if(remain<=0){ cancelPregameCountdown(true); proceedToStake(); return; }
+    if(numEl.textContent!==String(remain)){ numEl.textContent=remain; numEl.classList.remove('pop'); void numEl.offsetWidth; numEl.classList.add('pop'); }
+  }
+  tick();
+  pregameTimer=setInterval(tick,200);
+}
+function proceedToStake(){
+  // Countdown finished, player still connected — only NOW can the stake be
+  // signed. No signature → no match, no SOL moved (signature guard).
+  // Phantom connected → requireStake sends the REAL initialize_match
+  // transaction; the house opponent then stakes via join_match, also real.
+  $('btn-start').classList.add('hidden'); // stays hidden through signing + the match; the decline path below hands it back
+  requireStake('Stake '+fmt(wager())+' SOL into the match pot — winner takes 94% of the pot.', wager())
+    .then(function(){
+      if(realMode()){
+        setStatus('🤖 Swing Bot is staking on-chain…');
+        return chainBotJoin(wager()).then(function(){
+          setStatus('✓ Both stakes locked on-chain — the match is live. GLHF!');
+          startRound();
+        });
+      }
+      setStatus('✓ Signed by your wallet — stake locked in. GLHF!'); log('[wallet] stake signed by player · '+fmt(wager())+' SOL · signature verified ✓'); startRound();
+    })
+    .catch(function(){
+      $('btn-start').classList.remove('hidden');
+      lockWager(false); // stake flow aborted before any round — the selector is free again
+      if(realMode() && chain.escrowSig && !chain.joined && !chain.cancelSig){
+        // Your escrow landed but the opponent's stake didn't — refund it
+        // on-chain via cancel_match instead of leaving it locked.
+        setStatus('⚠ Opponent stake failed — refunding your escrow on-chain…');
+        chainCancel().then(function(){ setStatus('✓ Escrow refunded on-chain. Queue again when ready.'); })
+          .catch(function(){ setStatus('⚠ Refund transaction failed — your escrow stays in the match vault; leaving and re-entering the game screen retries the refund.'); });
+      } else {
+        setStatus('✋ Stake not completed — no SOL moved, no match started.');
+      }
+      log('[wallet] stake flow aborted','ruglog');
+    });
+}
+$('pg-disconnect').addEventListener('click', function(){
+  cancelPregameCountdown(); // countdown dead — the stake signature never even opens
+  disconnectWallet();
+  showScreen('lobby');
+  log('[session] backed out during pre-game countdown · zero SOL committed','ruglog');
+});
+
+// ---------- PvP MATCHMAKING — real player-vs-player flow (never the bot).
+// Queue → sign to lock YOUR wager → WAIT for an opponent → the second player
+// joins and locks their wager too → MATCHMAKING COUNTDOWN: 5s overlay with
+// both locked wagers and the total pot on screen → at zero, round 1 begins
+// automatically. If EITHER player disconnects during the countdown, it is
+// cancelled and the remaining player is returned to the lobby with the
+// wager refunded. (Hosted demo: the second player is a simulated arena
+// player — in production this is the game server's match_found /
+// opponent_left messages over the same WebSocket protocol.) ----------
+var matchMode='bot';
+var oppName='Swing Bot', oppShort='Bot';
+var waiting=false, waitTimer=null, mmWager=null;
+var mmActive=false, mmTimer=null, mmDeadline=0, mmOppDropAt=0;
+var PVP_NAMES=['DiamondDoge','WifHatWendy','ChadwickTrades','JeetSlayer99','PaperHandsPete'];
+var MATCH_WIN_LINES_PVP=[
+  'A real human just paid for your lunch. Somewhere out there, a very confident player is staring at their screen in total silence.',
+  'You out-sold a flesh-and-blood degen. The Swing Bot sends a thank-you card — it finally gets a day off.',
+  'GG. Well — rematch is one tap away, and your opponent is absolutely already queueing for revenge.'
+];
+var MATCH_LOSS_LINES_PVP=[
+  'A real player just took your SOL and your pride in the same click. Queue again and take both back.',
+  'Somewhere, a stranger is doing a little victory dance with your SOL. The rematch button is RIGHT there.',
+  'Beaten by an actual human — the shame is organic and locally sourced. Run it back, legend.'
+];
+function setMatchMode(m){
+  if(active||waiting||mmActive||pregameActive||signPending) return; // no switching mid-flow
+  matchMode=m;
+  $('mode-bot').classList.toggle('active', m==='bot');
+  $('mode-pvp').classList.toggle('active', m==='pvp');
+  $('btn-start').textContent=(m==='pvp')?'Find PvP Match — Stake & Play':'Queue Match — Stake & Play';
+  setStatus(m==='pvp' ? 'PvP: stake SOL, wait for a real player — when both bets lock, a 5s countdown starts the match.' : 'Ready to swing? Queue a match.');
+}
+$('mode-bot').addEventListener('click', function(){ setMatchMode('bot'); });
+$('mode-pvp').addEventListener('click', function(){ setMatchMode('pvp'); });
+function cleanupMatchmaking(){
+  if(waitTimer){ clearTimeout(waitTimer); waitTimer=null; }
+  if(mmTimer){ clearInterval(mmTimer); mmTimer=null; }
+  waiting=false; mmActive=false; mmOppDropAt=0;
+  var ov=$('mm-countdown'); if(ov) ov.classList.remove('open');
+  var cq=$('btn-cancel-queue'); if(cq) cq.classList.add('hidden');
+  if(!active && matchWager===null) $('wager').disabled=false; // free the selector only when no live match owns it — leaving a screen mid-match must not unlock the stake
+}
+function startMatchmaking(){
+  if(waiting||mmActive||active||signPending||pregameActive) return;
+  $('btn-start').classList.add('hidden');
+  lockWager(true); // locked from the signature request onward — the queued bet is the bet
+  // The player's bet locks FIRST — nothing queues without their signature.
+  // Phantom connected → the lock is a real initialize_match escrow, and the
+  // opponent's funding (free devnet SOL) starts warming up during the wait.
+  requireStake('Lock your wager into the PvP pot. A real player must match it before the countdown starts.', wager())
+    .then(function(){
+      mmWager=wager();
+      if(realMode()){
+        log('[chain] PvP stake escrowed on-chain · '+fmt(mmWager)+' SOL in the vault · tx '+shortSig(chain.escrowSig),'winlog');
+        chain.botReady=fundBot(Math.round(mmWager*1e9)+100000).catch(function(){ return false; });
+      } else {
+        log('[wallet] PvP stake signed · '+fmt(mmWager)+' SOL locked in the pot ✓');
+      }
+      enterWaiting();
+    })
+    .catch(function(){ $('btn-start').classList.remove('hidden'); lockWager(false); setStatus('✋ Stake not completed — no SOL moved, no queue joined.'); log('[wallet] PvP stake declined · zero funds moved','ruglog'); });
+}
+function enterWaiting(){
+  waiting=true;
+  $('wager').disabled=true; // the locked wager can't change while queued
+  $('btn-cancel-queue').classList.remove('hidden');
+  setStatus('⏳ Bet locked: '+fmt(mmWager)+' SOL in the pot — waiting for an opponent…');
+  log('[matchmaking] queued for PvP · wager '+fmt(mmWager)+' SOL locked · searching for opponent…');
+  waitTimer=setTimeout(opponentJoins, 2200+Math.random()*1800);
+}
+function opponentJoins(){
+  if(!waiting) return; waiting=false; waitTimer=null;
+  $('btn-cancel-queue').classList.add('hidden');
+  oppName=PVP_NAMES[Math.floor(Math.random()*PVP_NAMES.length)]; oppShort=oppName;
+  oppSnap=(Math.random()<0.15); oppSnapMs=26+Math.random()*14;
+  var lbl=$('chart-score-label'); if(lbl) lbl.textContent='Match score · You – '+oppName;
+  setStatus('⚔️ '+oppName+' joined — both bets locked!');
+  log('[matchmaking] opponent found: '+oppName+' · their '+fmt(mmWager)+' SOL locked · pot '+fmt(mmWager*2)+' SOL','winlog');
+  showMmCountdown(); // both bets locked → the 5s matchmaking countdown
+}
+function showMmCountdown(){
+  var ov=$('mm-countdown'); if(!ov) return;
+  mmActive=true;
+  $('mm-you-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
+  $('mm-opp-name').textContent='🔴 '+oppName;
+  $('mm-opp-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
+  $('mm-pot').textContent=fmt(mmWager*2)+' SOL';
+  $('mm-note').textContent='Both bets are locked in the pot. Round 1 starts at zero.';
+  $('mm-disconnect').classList.remove('hidden');
+  ov.classList.add('open');
+  mmDeadline=Date.now()+5000;
+  // Simulated line drop: occasionally the opponent's connection dies mid-
+  // countdown (production: the server's opponent_left message) — handled by
+  // opponentDropped(), which cancels and returns YOU to the lobby.
+  mmOppDropAt=(Math.random()<0.15) ? Date.now()+1600+Math.random()*2200 : 0;
+  var numEl=$('mm-num'); numEl.style.color='';
+  function tick(){
+    if(!mmActive) return;
+    if(!$('screen-game').classList.contains('active')||!walletConnected){ cleanupMatchmaking(); $('btn-start').classList.remove('hidden'); log('[matchmaking] countdown cancelled — player left · wager refunded','ruglog'); return; } // you disconnected mid-countdown
+    if(mmOppDropAt && Date.now()>=mmOppDropAt){ opponentDropped(); return; }
+    var remain=Math.ceil((mmDeadline-Date.now())/1000);
+    if(remain<=0){ // zero → round 1 begins automatically
+      mmActive=false; if(mmTimer){ clearInterval(mmTimer); mmTimer=null; }
+      ov.classList.remove('open'); // wager stays locked — startRound owns it now, disconnectSession frees it at match end
+      if(realMode() && !chain.joined){ // lock the opponent's stake on-chain (join_match) before round 1
+        setStatus('🔒 Locking the opponent stake on-chain…');
+        chainBotJoin(mmWager).then(function(){
+          log('[matchmaking] countdown complete · round 1 starting · pot '+fmt(mmWager*2)+' SOL locked on-chain');
+          startRound();
+        }).catch(function(){
+          setStatus('⚠ Opponent stake failed on-chain — refunding your wager…');
+          chainCancel().catch(function(){}).then(function(){ lockWager(false); showScreen('lobby'); });
+        });
+        return;
+      }
+      log('[matchmaking] countdown complete · round 1 starting · pot '+fmt(mmWager*2)+' SOL');
+      startRound(); return;
+    }
+    if(numEl.textContent!==String(remain)){ numEl.textContent=remain; numEl.classList.remove('pop'); void numEl.offsetWidth; numEl.classList.add('pop'); }
+  }
+  tick();
+  mmTimer=setInterval(tick,200);
+}
+function opponentDropped(){
+  if(!mmActive) return;
+  mmActive=false; if(mmTimer){ clearInterval(mmTimer); mmTimer=null; }
+  if(realMode() && chain.escrowSig && !chain.joined){ chainCancel().catch(function(){}); } // match never filled on-chain → real refund via cancel_match
+  log('[matchmaking] opponent disconnected during countdown · match cancelled · wager refunded','ruglog');
+  $('mm-label').textContent='✕ MATCH CANCELLED';
+  var n=$('mm-num'); n.textContent='✕'; n.style.color='var(--red)';
+  $('mm-note').textContent=oppName+' disconnected — match cancelled. Your wager is refunded; sending you back to the lobby.';
+  $('mm-disconnect').classList.add('hidden');
+  setTimeout(function(){
+    cleanupMatchmaking();
+    $('btn-start').classList.remove('hidden');
+    $('mm-label').textContent='⚔️ OPPONENT FOUND — MATCH STARTS IN'; // reset the overlay face for next time
+    showScreen('lobby'); // the remaining player returns to the lobby
+  }, 1800);
+}
+function mmDisconnect(){
+  // YOU disconnect during the countdown → cancel it, wallet disconnected,
+  // straight back to the lobby; the match never starts. The on-chain
+  // escrow (if any) is refunded via cancel_match BEFORE the wallet drops,
+  // because the refund needs your signature.
+  if(realMode() && chain.escrowSig && !chain.joined && !chain.cancelSig){
+    cleanupMatchmaking();
+    chainCancel().catch(function(){}).then(function(){ disconnectWallet(); showScreen('lobby'); });
+    log('[matchmaking] you disconnected during the countdown · on-chain refund sent · match cancelled','ruglog');
+    return;
+  }
+  cleanupMatchmaking();
+  disconnectWallet();
+  showScreen('lobby');
+  log('[matchmaking] you disconnected during the countdown · match cancelled · wager refunded','ruglog');
+}
+$('mm-disconnect').addEventListener('click', mmDisconnect);
+$('btn-cancel-queue').addEventListener('click', function(){
+  if(!waiting) return;
+  var wasReal=realMode() && chain.escrowSig && !chain.joined;
+  cleanupMatchmaking();
+  $('btn-start').classList.remove('hidden');
+  if(wasReal){ // the escrow is real — refund it on-chain via cancel_match
+    setStatus('⏳ Cancelling on-chain — approve the refund in Phantom…');
+    chainCancel().then(function(){ setStatus('✓ Queue cancelled — wager refunded on-chain. No match, no charge.'); })
+      .catch(function(e){ setStatus('⚠ On-chain cancel failed — your escrow is still locked in the match vault; leaving and re-entering the game screen retries the refund.'); });
+    log('[matchmaking] queue cancelled by player · on-chain refund requested');
+  } else {
+    setStatus('Queue cancelled — your wager was refunded. No match, no charge.');
+    log('[matchmaking] queue cancelled by player · wager refunded');
+  }
+});
+
+// ---------- Post-match flow: the INSTANT a best-of-3 is decided, the player
+// is DISCONNECTED from the game session — every timer stopped, all match
+// state cleared, session released — and relocated to the lobby (the screen
+// they came from), where the match-stats popup greets them. Round
+// transitions never come through here — they use the countdown above. ----------
+var MATCH_WIN_LINES=[
+  'Certified rug-dodger! Your fingers are faster than a validator on espresso — the bot has filed a formal complaint.',
+  'Diamond hands? Please. LIGHTNING hands. You sold so fast the chart needed a neck brace.',
+  'The dev rugged, the bot blinked, and you were already counting your SOL. Somewhere a jeet is crying into his ramen.'
+];
+var MATCH_LOSS_LINES=[
+  'Rugged, rugged, and rugged again. The bot sends its regards — and your SOL sends a postcard.',
+  'That exit was so late, archaeologists are studying it. Revenge is exactly one "Join Game" tap away, legend.',
+  'Paper hands? More like concrete shoes. But every chad was once a jeet who clicked Join Game one more time.'
+];
+function disconnectSession(){
+  clearTimers(); hideRoundCountdown(false); cancelPregameCountdown(); cleanupMatchmaking();
+  lockWager(false); mmWager=null; // match over — the selector is free again, and no stale PvP stake can leak into the next match's math
+  if(matchEndTimer){ clearTimeout(matchEndTimer); matchEndTimer=null; }
+  active=false; rugged=false; youMs=null; botMs=null; rugStamp=0;
+  wins=0; losses=0; roundNo=1; dots();
+  oppName='Swing Bot'; oppShort='Bot'; oppSnap=false; telMatch={you:[],opp:[]}; roundTel=null;
+  var dlbl=$('chart-score-label'); if(dlbl) dlbl.textContent='Match score · You – Bot';
+  $('rug').classList.remove('active');
+  var sell=$('btn-sell'); sell.classList.add('hidden'); sell.disabled=true;
+  var bs=$('btn-start'); bs.classList.remove('hidden'); bs.textContent=(matchMode==='pvp')?'Find PvP Match — Stake & Play':'Queue Match — Stake & Play';
+  log('[session] disconnected from game session · all match state cleared · timers stopped');
+}
+function telCommit(who){
+  var yRec={rt:(youMs!=null?youMs:null), sold:(youMs!=null), inputs:[], moves:0, pre:0};
+  if(roundTel){
+    yRec.moves=roundTel.moves;
+    for(var i=0;i<roundTel.events.length;i++){ var d=roundTel.events[i]-rugStamp; if(d<0) yRec.pre++; else yRec.inputs.push(d); }
+    roundTel=null;
+  }
+  if(yRec.sold&&yRec.inputs.length===0) yRec.inputs.push(yRec.rt);
+  telMatch.you.push(yRec);
+  var oSold=(who==='bot');
+  var oRec={rt:(oSold?botMs:null), sold:oSold, inputs:[], moves:0, pre:0};
+  if(oSold){ oRec.inputs.push(botMs); oRec.moves=oppSnap?0:Math.round(12+Math.random()*48); }
+  telMatch.opp.push(oRec);
+}
+function reviewWinner(side){
+  var all=telMatch[side]||[], recs=[], i;
+  for(i=0;i<all.length;i++){ if(all[i].sold&&all[i].rt!=null) recs.push(all[i]); }
+  var out={voided:false, score:0};
+  if(recs.length<2) return out;
+  var rts=recs.map(function(r){ return r.rt; });
+  var mean=0, mv=0, k;
+  for(k=0;k<rts.length;k++) mean+=rts[k];
+  mean/=rts.length;
+  var varSum=0; for(k=0;k<rts.length;k++) varSum+=(rts[k]-mean)*(rts[k]-mean);
+  var sd=Math.sqrt(varSum/rts.length), cv=mean>0?sd/mean:1;
+  var mx=Math.max.apply(null,rts), mn=Math.min.apply(null,rts);
+  for(k=0;k<recs.length;k++) mv+=recs[k].moves;
+  mv/=recs.length;
+  var fast=(mean<100&&mx<130), steady=(cv<0.08&&(mx-mn)<25), still=(mv<2);
+  out.score=(fast?45:0)+(steady?30:0)+(still?25:0);
+  out.voided=(fast&&steady&&still);
+  return out;
+}
+function endMatch(won, note){
+  var w=(matchWager!==null?matchWager:wager()); // this match's stake per player
+  var pot=w*2;
+  var finalScore=wins+' – '+losses; // captured BEFORE the session state is wiped
+  var oppLbl=oppShort; // likewise captured before the wipe
+  // Settlement shape mirrors the adjudicator's settle call: one share per
+  // side — winner side, loser side, house side — always summing to the pot.
+  var verdict=reviewWinner(won?'you':'opp');
+  var settle={winner:(won?'you':'opp'), voided:verdict.voided, score:verdict.score,
+    winnerShare:pot*0.94, loserShare:0, houseShare:pot*0.06};
+  if(verdict.voided){ settle.winnerShare=0; settle.loserShare=pot*0.5; settle.houseShare=pot*0.5; }
+  var payout=won? settle.winnerShare : settle.loserShare; // what lands back in YOUR wallet
+  var pnl=payout-w;
+  // REAL on-chain matches: the anti-bot review stays STAGED (it never moves
+  // money) — settle_match only knows winner 1 or 2, so a flagged result
+  // settles the pot to the NON-flagged side, 94/6 like any other match.
+  var isRealChain=realMode() && chain.joined && !!chain.escrowSig;
+  if(isRealChain && verdict.voided){
+    var flaggedYou=won; // the review inspected the winner — that's who got flagged
+    settle.winner=flaggedYou?'opp':'you'; settle.winnerShare=pot*0.94; settle.loserShare=0; settle.houseShare=pot*0.06;
+    payout=flaggedYou?0:pot*0.94; pnl=payout-w; verdict.voided=false; verdict.chainVoid=true;
+  }
+  recordMatch(won&&!verdict.voided&&!verdict.chainVoid, payout); // a flagged "win" the review overturned never counts as a won match in the stats
+  if(verdict.voided){
+    log('[server] match_end outcome=void · settle_match → adjudicator · winner share 0.000 SOL · loser refunded '+fmt(settle.loserShare)+' SOL', won?'ruglog':'winlog');
+    log(treasuryLockOk()?'[chain] house share '+fmt(settle.houseShare)+' SOL → treasury wallet · LOCKED ✓ (the one locked fee receiver)':'[chain] ⛔ TREASURY LOCK CHECK FAILED — settlement refused','winlog');
+  }
+  else if(won){ level++; log('[server] match_end outcome=win payout='+fmt(payout)+' SOL · settle_match → adjudicator','winlog'); log(treasuryLockOk()?'[chain] fee '+fmt(settle.houseShare)+' SOL (6%) → treasury wallet · LOCKED ✓ (the one locked fee receiver)':'[chain] ⛔ TREASURY LOCK CHECK FAILED — settlement refused','winlog'); }
+  else { if(level>1) level--; log('[server] match_end outcome=loss','ruglog'); }
+  $('rank').textContent='Level '+level+' · '+((won&&!verdict.voided)?'CHAD':'JEET');
+  if(walletDemo){ demoBalance=Math.max(0, demoBalance+pnl); balanceText=fmt(demoBalance)+' SOL · demo'; }
+  disconnectSession();   // 1 · disconnect immediately — session gone, state wiped
+  showScreen('lobby');   // 2 · relocate to the previous screen (the lobby)
+  if(!won){
+    // 3 · the waiting player watches the puzzle popup while the winner is
+    // checked; it closes itself on a pass (normal result follows) and turns
+    // into the refund announcement on a confirmed catch.
+    openVerifyPopup();
+    var lossNote=note||'';
+    setTimeout(function(){
+      if(verdict.voided){ openRefundResult({refund:settle.loserShare, wagered:w, score:finalScore, opp:oppLbl}); }
+      else { closeRefundResult(true); openMatchResult({won:false, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:lossNote, voided:false}); }
+    }, 2600+Math.random()*900);
+  }
+  else { openMatchResult({won:won, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:note||'', voided:verdict.voided}); } // 3 · stats popup on arrival
+  // 4 · REAL settlement: the adjudicator (your wallet) signs settle_match —
+  // the program pays 94% to the winner / 6% to the locked treasury wallet.
+  // The owed settle is recorded from the CHAIN state (joined + escrowed +
+  // unsettled), not from the wallet's current connection: if the wallet
+  // dropped mid-match, the pot is still locked on-chain and the settle is
+  // still owed — it survives the disconnect and is offered again the
+  // moment the wallet reconnects (see recoverOwedSettle). The account set
+  // is snapshotted NOW, so a settle retried later can never land on a
+  // different match. (isRealChain above still gates the anti-bot verdict
+  // adjustments, which need a live connection to mean anything.)
+  var settleOwed=chain.joined && !!chain.escrowSig && !chain.settleSig;
+  if(settleOwed){
+    // summary rides along so a settle retried later rebuilds this exact
+    // result popup.
+    var winKey=(settle.winner==='you') ? chain.playerKey : (chain.botKey&&chain.botKey.publicKey);
+    chain.pendingSettle={ winnerId:(settle.winner==='you'?1:2),
+      accounts:{ matchState:chain.matchState?chain.matchState.toString():null, vault:chain.vault?chain.vault.toString():null, winnerKey:winKey?winKey.toString():null },
+      summary:{ won:won, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:note||'', voided:false, mode:matchMode } };
+    if(realMode()) chainDoSettle();
+    else log('[chain] settle_match still owed — reconnect the wallet to sign it and release the pot','ruglog');
+  }
+}
+function openMatchResult(s){
+  var ov=$('match-modal'); if(!ov) return;
+  ov.classList.toggle('loss', !s.won);
+  $('mm-title').textContent=s.voided?'🏁 MATCH COMPLETE':(s.won?'🏆 YOU WIN THE MATCH!':'💀 YOU LOST THE MATCH');
+  var funnyLines=(matchMode==='pvp') ? (s.won?MATCH_WIN_LINES_PVP:MATCH_LOSS_LINES_PVP) : (s.won?MATCH_WIN_LINES:MATCH_LOSS_LINES);
+  $('mm-funny').textContent=funnyLines[Math.floor(Math.random()*funnyLines.length)];
+  var resEl=$('mm-result');
+  resEl.textContent=(s.won?'WIN':'LOSS')+(s.note?' · '+s.note:'');
+  resEl.style.color=s.won?'var(--green)':'var(--red)';
+  var pnlEl=$('mm-pnl');
+  pnlEl.textContent=(s.pnl>0?'+':s.pnl<0?'−':'')+fmt(Math.abs(s.pnl))+' SOL';
+  pnlEl.style.color=s.pnl>0?'var(--green)':(s.pnl<0?'var(--red)':'');
+  $('mm-wagered').textContent=fmt(s.wagered)+' SOL';
+  $('mm-score').textContent='You '+s.score+' Bot';
+  if(realMode() && chain.settleSig){ setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(chain.settleSig)+'" target="_blank" rel="noopener">tx '+shortSig(chain.settleSig)+' ↗</a>'); }
+  else if(realMode() && chain.pendingSettle){ $('mm-settle').textContent='⏳ Settling on-chain — approve in Phantom…'; }
+  else if(chain.pendingSettle && !chain.settleSig){ $('mm-settle').textContent='⏳ Settlement owed on-chain — reconnect your wallet, then tap here to sign settle_match.'; }
+  else { $('mm-settle').textContent=s.voided? '0.000 SOL payout · settled by the adjudicator' : (s.won? (fmt(s.payout)+' SOL payout · ✓ Signed by your wallet') : 'Stake to winner · ✓ stake was signed by your wallet'); }
+  ov.classList.add('open');
+  $('btn-join-game').focus();
+}
+function closeMatchResult(){ var ov=$('match-modal'); if(ov) ov.classList.remove('open'); }
+$('mm-settle').addEventListener('click', function(){ if(chain.pendingSettle && !chain.settleSig) chainDoSettle(); }); // tap the Settlement row to retry an unsigned settle
+$('match-modal-close').addEventListener('click', closeMatchResult);
+$('match-modal').addEventListener('click', function(e){ if(e.target===this) closeMatchResult(); });
+var REFUND_JOKES=[
+  'Plot twist: your "opponent" was a bot in a fake mustache. Bots don\'t collect pots at SolSwing — your SOL is coming home. 🥸',
+  'That player\'s reflexes were powered by a script and pure audacity. Consider it debugged — your stake is refunded in full. 🤖💥',
+  'Somewhere, a script just got benched for the season. Your opponent turned out to be 40 lines of code in a trench coat — and trench coats don\'t get payouts. 🧥',
+  'Your opponent sold with the confidence of someone who has never owned a finger. Zero for the robot, full refund for the human. 💸'
+];
+var rfLocked=false;
+function rfShowFinal(show){
+  var list=[$('rf-joke'),$('rf-amount')];
+  document.querySelectorAll('#refund-modal .sec-row, #refund-modal .wm-note, #refund-modal .lr-actions').forEach(function(el){ list.push(el); });
+  for(var i=0;i<list.length;i++){ if(list[i]) list[i].classList.toggle('hidden', !show); }
+}
+function openVerifyPopup(){
+  var ov=$('refund-modal'); if(!ov) return;
+  rfLocked=true; // stays up, undismissable, until the check completes
+  $('rf-title').textContent='🛡️ ANTI-BOT PUZZLE IN EFFECT';
+  $('refund-modal-close').classList.add('hidden');
+  $('rf-wait').classList.remove('hidden');
+  rfShowFinal(false);
+  ov.classList.add('open');
+}
+function openRefundResult(s){
+  var ov=$('refund-modal'); if(!ov) return;
+  rfLocked=false; // check complete — the same popup becomes the refund announcement
+  $('rf-title').textContent='🎉 PLOT TWIST — REFUND INCOMING!';
+  $('refund-modal-close').classList.remove('hidden');
+  $('rf-wait').classList.add('hidden');
+  rfShowFinal(true);
+  $('rf-joke').textContent=REFUND_JOKES[Math.floor(Math.random()*REFUND_JOKES.length)];
+  $('rf-amount').textContent='+'+fmt(s.refund)+' SOL';
+  $('rf-wagered').textContent=fmt(s.wagered)+' SOL';
+  $('rf-refunded').textContent=fmt(s.refund)+' SOL';
+  var pnl=s.refund-s.wagered, pnlEl=$('rf-pnl');
+  pnlEl.textContent=(pnl>0?'+':pnl<0?'−':'')+fmt(Math.abs(pnl))+' SOL';
+  pnlEl.style.color=pnl>0?'var(--green)':(pnl<0?'var(--red)':'');
+  $('rf-score').textContent='You '+s.score+' '+s.opp;
+  ov.classList.add('open');
+  $('rf-join').focus();
+}
+function closeRefundResult(force){
+  if(rfLocked&&!force) return; // mid-check the popup dismisses itself, never the player
+  var ov=$('refund-modal'); if(ov) ov.classList.remove('open');
+}
+$('refund-modal-close').addEventListener('click', closeRefundResult);
+$('refund-modal').addEventListener('click', function(e){ if(e.target===this) closeRefundResult(); });
+$('rf-join').addEventListener('click', function(){ closeRefundResult(); showScreen('game'); if(walletConnected) $('btn-start').click(); });
+$('rf-disconnect').addEventListener('click', function(){ closeRefundResult(); disconnectWallet(); });
+
+// ═══════════════════════════════════════════════════════════════════════
+// WALLET SIGNATURE GUARD — HARD SECURITY RULE.
+// No SOL can EVER move without the player's own wallet signature. Every
+// stake (and, on the real on-chain build, every payout confirmation)
+// routes through requireWalletSignature(), which resolves ONLY after the
+// player signs — Phantom signMessage for a connected wallet, an explicit
+// sign tap in this window for the demo wallet. Cancel, reject, X,
+// tap-outside or Escape reject the promise and the caller aborts: the
+// match never starts and zero funds move. Nothing auto-signs, ever.
+// ═══════════════════════════════════════════════════════════════════════
+var signPending=null;
+function requireWalletSignature(actionLabel, detail, amountSol){
+  return new Promise(function(resolve, reject){
+    if(signPending){ var old=signPending; signPending=null; old.reject(new Error('superseded')); }
+    signPending={resolve:resolve, reject:reject, kind:'message'};
+    $('sg-action').textContent=String(actionLabel).toUpperCase();
+    $('sg-detail').textContent=detail;
+    $('sg-amount').textContent=fmt(amountSol)+' SOL';
+    $('sg-signed').textContent='✓ Signed by your wallet';
+    $('sg-signed').classList.add('hidden');
+    var trx=$('sg-txrow'); if(trx) trx.classList.add('hidden');
+    $('sg-sign').textContent='✍️ Sign with Wallet';
+    $('sg-sign').disabled=false;
+    $('sign-modal').classList.add('open');
+    $('sg-sign').focus();
+  });
+}
+// The stake gate: with Phantom connected this sends the REAL
+// initialize_match transaction (your SOL escrows into the program vault
+// only when Phantom confirms it); with the demo wallet it falls back to
+// the signature-message guard above. Resolves only after the escrow is
+// confirmed on-chain (real mode) or the signature lands (demo mode).
+function requireStake(detail, wagerSol){
+  if(!realMode()) return requireWalletSignature('Stake', detail, wagerSol);
+  return new Promise(function(resolve, reject){
+    if(signPending){ var old=signPending; signPending=null; old.reject(new Error('superseded')); }
+    signPending={resolve:resolve, reject:reject, kind:'stake', wagerSol:wagerSol};
+    $('sg-action').textContent='STAKE · ON-CHAIN';
+    $('sg-detail').textContent=detail+' Phantom will ask you to approve the initialize_match transaction that escrows it into the SolSwing program vault on devnet.';
+    $('sg-amount').textContent=fmt(wagerSol)+' SOL';
+    $('sg-signed').classList.add('hidden');
+    var trx=$('sg-txrow'); if(trx) trx.classList.add('hidden');
+    $('sg-sign').textContent='✍️ Sign & Stake in Phantom';
+    $('sg-sign').disabled=false;
+    $('sign-modal').classList.add('open');
+    $('sg-sign').focus();
+  });
+}
+function settleSignature(okSig){
+  var p=signPending; signPending=null;
+  $('sign-modal').classList.remove('open');
+  if(p){ if(okSig) p.resolve(true); else p.reject(new Error('signature declined')); }
+}
+$('sg-sign').addEventListener('click', async function(){
+  if(signPending && signPending.kind==='stake'){ // REAL on-chain stake: initialize_match via Phantom
+    var sbtn=this; sbtn.disabled=true;
+    var myPending=signPending, myWager=signPending.wagerSol; // identity token: everything below must only ever resolve THIS request
+    try{
+      var esig=await chainStake(myWager);
+      if(signPending!==myPending){
+        // Cancelled / superseded / wallet dropped WHILE Phantom was
+        // signing — but the escrow transaction landed. Refund it now:
+        // never leave SOL locked in the vault behind a "stake not
+        // completed" message.
+        if(chain.escrowSig===esig && !chain.joined && !chain.cancelSig){
+          setStatus('⚠ Stake landed after the request was cancelled — refunding your escrow on-chain…');
+          chainCancel().then(function(){ setStatus('✓ Escrow refunded on-chain — no match started, no SOL kept.'); }).catch(function(){ setStatus('⚠ Escrow refund could not be sent — your SOL stays in the match vault; reconnect and leave the game screen to retry the refund.'); });
+          log('[chain] post-cancel escrow refund fired · tx '+shortSig(esig),'ruglog');
+        }
+        return;
+      }
+      var trow=$('sg-txrow'), tEl=$('sg-tx');
+      if(trow&&tEl){ tEl.innerHTML='<a href="'+explorerTx(esig)+'" target="_blank" rel="noopener">'+shortSig(esig)+' ↗</a>'; trow.classList.remove('hidden'); }
+      var sEl=$('sg-signed'); sEl.textContent='✓ Escrow confirmed on-chain'; sEl.classList.remove('hidden');
+      setTimeout(function(){ if(signPending===myPending) settleSignature(true); }, 900);
+    }catch(e){
+      if(signPending!==myPending){ return; } // already resolved by the cancel/supersede — never touch the newer request's state
+      if(e && e.message==='insufficient'){
+        // Keep the window open with the faucet directions — the player can
+        // top up free devnet SOL and hit Sign again, or cancel out.
+        $('sg-detail').textContent='⚠ Not enough devnet SOL for this wager + rent/fees. Devnet SOL is free: get some from faucet.solana.com (it asks for a GitHub sign-in), then hit Sign & Stake again — or Cancel to back out. Nothing has moved.';
+        sbtn.disabled=false;
+      } else { settleSignature(false); } // rejected in Phantom / tx failed → abort, no match
+    }
+    return;
+  }
+  this.disabled=true;
+  var myPendingMsg=signPending;
+  try{
+    if(walletConnected && !walletDemo && walletAdapter.connected){
+      var msg='SolSwing · '+$('sg-action').textContent+' · '+$('sg-amount').textContent+' · '+new Date().toISOString();
+      await walletAdapter.signMessage(new TextEncoder().encode(msg)); // real Phantom signature, via the adapter
+    }
+    if(signPending!==myPendingMsg) return; // cancelled while Phantom was open — the abort already resolved this request; a late signature must not resolve a newer one
+    $('sg-signed').classList.remove('hidden'); // ✓ Signed by your wallet
+    setTimeout(function(){ if(signPending===myPendingMsg) settleSignature(true); }, 700);
+  }catch(e){ if(signPending===myPendingMsg) settleSignature(false); } // player rejected in Phantom → abort, no funds move
+});
+$('sg-cancel').addEventListener('click', function(){ settleSignature(false); });
+$('sign-modal-close').addEventListener('click', function(){ settleSignature(false); });
+$('sign-modal').addEventListener('click', function(e){ if(e.target===this) settleSignature(false); });
+function disconnectWallet(){
+  cleanupMatchmaking(); // a wallet disconnect mid-queue/countdown cancels matchmaking
+  if(signPending) settleSignature(false); // an armed signature request dies with the session — it must never resolve against a disconnected wallet
+  // An open, unfilled on-chain escrow gets its cancel_match refund fired
+  // BEFORE the wallet drops — the refund needs your signature.
+  if(realMode() && phantomProvider() && chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig){ var cp=chainCancel(); if(cp&&cp.catch) cp.catch(function(){}); }
+  var wasPhantom=walletConnected && !walletDemo;
+  // An unsettled JOINED match keeps its whole chain context across the
+  // disconnect: its pot is locked on-chain and its settle is still owed.
+  // Wiping it here would strand the pot with no in-page way back. Any
+  // other chain state belongs to a finished or abandoned match — clear
+  // it, so a stale escrow can never leak into the next wallet session.
+  var settleOwedDc=!!(chain.pendingSettle && chain.joined && chain.escrowSig && !chain.settleSig);
+  walletConnected=false; walletDemo=false; walletAddr=''; walletFullAddr=''; balanceText='— SOL'; demoBalance=10;
+  chain.playerKey=null; chain.balanceLamports=null; if(!settleOwedDc) chain.pendingSettle=null; updateFaucetNote();
+  if(!settleOwedDc){ chain.escrowSig=null; chain.joinSig=null; chain.settleSig=null; chain.cancelSig=null; chain.joined=false; chain.matchId=null; chain.matchState=null; chain.vault=null; }
+  if(!active && matchWager===null) lockWager(false);
+  // Disconnect through the adapter. Local state is already torn down, so
+  // the adapter's 'disconnect' event listener no-ops instead of looping.
+  if(wasPhantom){ try{ var dp=walletAdapter.disconnect(); if(dp&&dp.catch) dp.catch(function(){}); }catch(e){} }
+  paintWalletButton();
+  closeMatchResult();
+  closeRefundResult();
+  log('[wallet] disconnected');
+}
+$('btn-join-game').addEventListener('click', function(){
+  closeMatchResult();
+  showScreen('game'); // no wallet → the game screen's connect popup greets them there
+  if(walletConnected) $('btn-start').click(); // a fresh match is a fresh stake — routes through the signature guard like every stake
+});
+$('btn-disconnect').addEventListener('click', disconnectWallet);
+function finishRound(who){
+  if(!active) return; active=false; clearTimers();
+  $('rug').classList.remove('active'); // round decided — clear the rug flash, result lives in the status line
+  if(who==='you'&&youMs==null) youMs=Date.now()-rugStamp;
+  if(botMs==null) botMs=9999;
+  telCommit(who);
+  $('btn-sell').classList.add('hidden'); $('btn-start').classList.remove('hidden'); $('btn-start').textContent='Queue Next Round';
+  if(who==='you'){ wins++; setStatus('🟢 Frontrun! You sold in '+youMs+'ms vs '+oppShort+' '+botMs+'ms.'); log('[server] round_result winner=player · '+youMs+'ms vs '+botMs+'ms','winlog'); }
+  else { losses++; if(youMs!=null){ setStatus('🔴 '+oppShort+' beat you — '+botMs+'ms vs your '+youMs+'ms.'); } else { setStatus('🔴 RUGGED! '+oppShort+' sold in '+botMs+'ms — you never exited.'); } log('[server] round_result winner=opponent · '+botMs+'ms','ruglog'); }
+  dots(); roundNo++;
+  if(wins>=2||losses>=2){ endMatch(wins>=2); } // decided → disconnect NOW: lobby + stats popup (see endMatch)
+  else { showRoundCountdown(); } // match not decided — 5s countdown overlay, then the next round starts itself
+  updateHUD();
+}
+function forfeit(reason){
+  if(!active) return; active=false; clearTimers(); losses=2; dots();
+  log('[server] forfeit · '+reason,'ruglog');
+  endMatch(false, 'Forfeited'); // decided → disconnect NOW: lobby + stats popup
+}
+// Queue / Join Game = start the PRE-GAME COUNTDOWN first. Only when it
+// completes (player still connected) does the stake signature open —
+// no signature → no match, no SOL moved.
+$('btn-start').addEventListener('click', function(){
+  if(active||signPending||pregameActive||waiting||mmActive) return;
+  if(!walletConnected){ openConnectModal(); return; } // no wallet → the connect popup, right here on the game screen
+  if(walletDemo && wins===0 && losses===0 && demoBalance < wager()-1e-9){ setStatus('Demo wallet is short for a '+fmt(wager())+' SOL wager — disconnect the demo wallet and reconnect it to top back up to 10 SOL.'); return; } // a stake the balance can't cover is never signed (the real wallet path enforces the same rule on-chain via the 'insufficient' check)
+  if(wins>0||losses>0){ startRound(); return; } // safety only — mid-match rounds auto-start via the countdown
+  if(matchMode==='pvp'){ startMatchmaking(); return; } // PvP: sign → wait for opponent → both bets locked → matchmaking countdown → round 1
+  startPregameCountdown();
+});
+$('btn-sell').addEventL
