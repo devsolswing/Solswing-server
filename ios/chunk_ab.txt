@@ -646,7 +646,20 @@ async function botSend(ixs){
   await conn.confirmTransaction({ signature:sig, blockhash:bh.blockhash, lastValidBlockHeight:bh.lastValidBlockHeight }, 'confirmed');
   return sig;
 }
-function ensureBot(){ if(!chain.botKey){ chain.botKey=solanaWeb3.Keypair.generate(); } return chain.botKey; }
+function ensureBot(){
+  if(chain.botKey) return chain.botKey;
+  try{
+    var saved=localStorage.getItem('solswing_bot_key');
+    if(saved){
+      var arr=JSON.parse(saved);
+      chain.botKey=solanaWeb3.Keypair.fromSecretKey(new Uint8Array(arr));
+      return chain.botKey;
+    }
+  }catch(e){}
+  chain.botKey=solanaWeb3.Keypair.generate();
+  try{ localStorage.setItem('solswing_bot_key', JSON.stringify(Array.from(chain.botKey.secretKey))); }catch(e){}
+  return chain.botKey;
+}
 // Fund the house opponent's stake with FREE devnet SOL (public faucet
 // airdrop into its in-page wallet). Player funds are never used for this.
 async function fundBot(needLamports){
@@ -654,12 +667,23 @@ async function fundBot(needLamports){
   var bal=await conn.getBalance(bot.publicKey);
   if(bal>=needLamports) return true;
   var amt=(needLamports-bal)+20000000; // shortfall + 0.02 SOL fee buffer
-  var sig=null;
-  try{ sig=await conn.requestAirdrop(bot.publicKey, amt); await conn.confirmTransaction(sig,'confirmed'); }
-  catch(e){
-    var pub=new solanaWeb3.Connection(PUBLIC_DEVNET_RPC,'confirmed');
-    sig=await pub.requestAirdrop(bot.publicKey, amt);
-    await pub.confirmTransaction(sig,'confirmed');
+  // Retry up to 3 times with delays - faucet is often rate-limited on first try
+  for(var attempt=0; attempt<3; attempt++){
+    try{
+      var sig=await conn.requestAirdrop(bot.publicKey, amt);
+      await conn.confirmTransaction(sig,'confirmed');
+      bal=await conn.getBalance(bot.publicKey);
+      if(bal>=needLamports) return true;
+    }catch(e){
+      try{
+        var pub=new solanaWeb3.Connection(PUBLIC_DEVNET_RPC,'confirmed');
+        var sig2=await pub.requestAirdrop(bot.publicKey, amt);
+        await pub.confirmTransaction(sig2,'confirmed');
+        bal=await conn.getBalance(bot.publicKey);
+        if(bal>=needLamports) return true;
+      }catch(e2){}
+    }
+    if(attempt<2) await new Promise(function(r){ setTimeout(r, 5000); }); // wait 5s between retries
   }
   bal=await conn.getBalance(bot.publicKey);
   return bal>=needLamports;
@@ -746,21 +770,3 @@ async function chainCancel(){
     var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
     var ix=new solanaWeb3.TransactionInstruction({
       programId:pid,
-      keys:[
-        { pubkey:chain.matchState, isSigner:false, isWritable:true },
-        { pubkey:chain.vault, isSigner:false, isWritable:true },
-        { pubkey:chain.playerKey, isSigner:true, isWritable:true },
-        { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
-      ],
-      data:ixData(DISC.cancel_match, [u64le(chain.matchId)])
-    });
-    var sig=await phantomSend([ix]);
-    chain.cancelSig=sig; chain.lastTx=sig;
-    log('[chain] cancel_match confirmed · escrow refunded to your wallet · tx '+shortSig(sig),'winlog');
-    refreshBalance().then(updateFaucetNote);
-    return sig;
-  } finally { chain.cancelBusy=false; }
-}
-function buildSettleIx(winnerId, ctx){
-  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
-  // ctx (optional) is the account snapshot taken when the settle fell
