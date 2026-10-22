@@ -23,34 +23,47 @@
     const res = await fetch(base + chunks[i]);
     html += await res.text();
   }
-  // Parse the HTML and replace document content WITHOUT document.write
-  // document.write creates a new document that loses Phantom's provider bridge on iOS
-  // Instead, we replace the entire <html> content while keeping the same window/document
+  // Save Phantom provider before replacing document
+  const savedPhantom = window.phantom;
+  const savedSolana = window.solana;
+  
+  // Parse and inject without document.write (preserves window)
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
-  // Copy head content
   document.head.innerHTML = doc.head.innerHTML;
-  // Copy body content
   document.body.innerHTML = doc.body.innerHTML;
-  // Execute scripts manually (innerHTML doesn't run scripts)
-  const scripts = doc.querySelectorAll('script');
+  
+  // Restore Phantom provider if lost
+  if (savedPhantom && !window.phantom) window.phantom = savedPhantom;
+  if (savedSolana && !window.solana) window.solana = savedSolana;
+  
+  // Execute scripts in order
+  const scripts = Array.from(doc.querySelectorAll('script'));
   for (const oldScript of scripts) {
     const newScript = document.createElement('script');
     if (oldScript.src) {
       newScript.src = oldScript.src;
+      // Wait for external scripts
+      await new Promise((resolve, reject) => {
+        newScript.onload = resolve;
+        newScript.onerror = resolve;
+        document.body.appendChild(newScript);
+      });
     } else {
       newScript.textContent = oldScript.textContent;
+      document.body.appendChild(newScript);
     }
-    // Copy attributes
-    for (const attr of oldScript.attributes) {
-      newScript.setAttribute(attr.name, attr.value);
-    }
-    document.body.appendChild(newScript);
   }
-  // Copy html attributes
-  for (const attr of doc.documentElement.attributes) {
-    document.documentElement.setAttribute(attr.name, attr.value);
-  }
+  
+  // Fire DOMContentLoaded and load events for game init code that waits for them
+  // (the loader page already fired these, so injected scripts miss them)
+  setTimeout(function() {
+    document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
+    window.dispatchEvent(new Event('load'));
+    // Also try common init function names
+    if (typeof window.init === 'function') window.init();
+    if (typeof window.startGame === 'function') window.startGame();
+  }, 100);
 })();
 </script>
 </body>
