@@ -646,18 +646,12 @@ async function botSend(ixs){
   await conn.confirmTransaction({ signature:sig, blockhash:bh.blockhash, lastValidBlockHeight:bh.lastValidBlockHeight }, 'confirmed');
   return sig;
 }
+// House bot wallet — pre-funded with devnet SOL, no faucet needed.
+// Wagers come directly from this wallet. (Devnet only — small amounts.)
+var HOUSE_BOT_SECRET=[75,86,199,4,254,220,97,62,69,140,30,100,160,248,47,25,111,228,195,133,113,234,51,29,210,29,136,65,53,26,221,42,157,147,51,67,145,254,222,229,167,228,31,42,205,252,241,232,50,148,45,40,112,29,106,228,109,93,13,171,48,19,251,61];
 function ensureBot(){
   if(chain.botKey) return chain.botKey;
-  try{
-    var saved=localStorage.getItem('solswing_bot_key');
-    if(saved){
-      var arr=JSON.parse(saved);
-      chain.botKey=solanaWeb3.Keypair.fromSecretKey(new Uint8Array(arr));
-      return chain.botKey;
-    }
-  }catch(e){}
-  chain.botKey=solanaWeb3.Keypair.generate();
-  try{ localStorage.setItem('solswing_bot_key', JSON.stringify(Array.from(chain.botKey.secretKey))); }catch(e){}
+  chain.botKey=solanaWeb3.Keypair.fromSecretKey(new Uint8Array(HOUSE_BOT_SECRET));
   return chain.botKey;
 }
 // Fund the house opponent's stake with FREE devnet SOL (public faucet
@@ -767,6 +761,4 @@ async function chainCancel(){
   if(!chain.escrowSig || chain.joined || chain.cancelSig || chain.cancelBusy) return null;
   chain.cancelBusy=true;
   try{
-    var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
-    var ix=new solanaWeb3.TransactionInstruction({
-      programId:pid,
+    var pid=new solanaWeb3.PublicKey(PR
