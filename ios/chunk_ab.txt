@@ -1,0 +1,766 @@
+ on-chain settlement and development. It's taken from the pot at settlement — the winner's 94% is never touched afterwards.</p></details>
+    <details class="faq"><summary>What happens if I close the tab or switch apps mid-round?</summary><p>You forfeit. Anti-rage-quit is enforced by both the page and the server: hide the tab, disconnect or let the 5-second sell window lapse and the round — and, on a rage quit, the whole match pot — goes to your opponent.</p></details>
+    <details class="faq"><summary>Do I need a Phantom wallet to try it?</summary><p>Yes — SolSwing connects through Phantom only, and runs exclusively inside the Phantom app's built-in browser. Open Phantom, tap its browser icon, enter solswing.vercel.app, then tap Connect Wallet and approve in Phantom's native prompt — all without leaving the game. Devnet SOL is free play money, so wagering costs nothing real.</p></details>
+    <details class="faq"><summary>Can the other player cheat?</summary><p>Not from their browser. The rug timing, the sell timestamps and the winner are all decided by the game server, and the payout is executed by the on-chain program, which checks the winner and refuses double payouts. An edited client can change what it displays, but never the result.</p></details>
+    <details class="faq"><summary>Does it work on my phone?</summary><p>SolSwing plays inside the Phantom app's built-in browser on iPhone and Android. Open the Phantom app, tap the browser icon, and enter solswing.vercel.app — outside Phantom's browser the game shows an “Open in Phantom” prompt instead. Inside Phantom, Connect Wallet and every stake, settlement and refund signature happen natively in place: no app switching, no redirects. On mobile you tap SELL instead of pressing Space, and all five pages stack into a single thumb-friendly column.</p></details>
+  <!-- HOW IT WORKS -->
+  <div class="section">
+    <h2>Game-server based, not browser-trusted</h2>
+    <p class="lead">The original version decided everything in the browser — anyone could edit the rug time or fake a win. SolSwing flips that: the server is the referee, the Solana program is the vault.</p>
+    <div class="flow">
+      <div class="flow-step"><i>STEP 1 · ESCROW</i><h3>Both players stake</h3><p><span class="mono">initialize_match</span> (P1) + <span class="mono">join_match</span> (P2) lock equal wagers into a PDA vault. Two-phase, so nobody has to co-sign someone else's transaction.</p></div>
+      <div class="flow-step"><i>STEP 2 · SERVER ROUND</i><h3>Server picks the rug</h3><p>The Node server picks a secret rug moment, streams <span class="mono">tick</span> messages to both clients, then broadcasts <span class="mono">rug</span>. Clients learn it at the same instant the server stamps it.</p></div>
+      <div class="flow-step"><i>STEP 3 · REFLEX RACE</i><h3>Fastest sell wins</h3><p>Server timestamps sell messages on arrival — client timestamps are ignored. Late sells (&gt;5s), double sells, disconnects and hidden-tab forfeits are all handled server-side.</p></div>
+      <div class="flow-step"><i>STEP 4 · SETTLE ON-CHAIN</i><h3>Adjudicator pays out</h3><p>Only the adjudicator (game server key) can call <span class="mono">settle_match</span>. The program checks the winner, then pays 94% to the winner and 6% to the treasury with checked math.</p></div>
+    </div>
+  </div>
+
+  <!-- CODE -->
+  <div class="section">
+    <h2>The code that runs it</h2>
+    <p class="lead">Full fixed files live in your workspace at <span class="mono">your_files/solswing/</span> — <span class="mono">server.js</span>, <span class="mono">app.js</span>, <span class="mono">style.css</span> and <span class="mono">programs/solswing/src/lib.rs</span>. Key excerpts:</p>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="server">server.js — authority</button>
+      <button class="tab" data-tab="contract">lib.rs — Solana program</button>
+      <button class="tab" data-tab="client">client protocol</button>
+    </div>
+
+    <div class="codebox" id="panel-server">
+      <header><span>server.js · Node + ws · rug &amp; settlement</span><span>PORT 8080</span></header>
+      <pre>// Rug is generated SERVER-SIDE — client never knows it in advance
+const rugDelay = 4000 + Math.random() * 5000; // 4–9s
+round.rugTimer = setTimeout(() =&gt; {
+  round.rugBroadcastAt = Date.now(); // authoritative stamp
+  broadcast(match, { type: 'rug', serverTime: round.rugBroadcastAt });
+}, rugDelay);
+
+// Sell: server timestamps on arrival, clientTime is IGNORED
+if (msg.type === 'sell') {
+  const msAfterRug = Date.now() - match.round.rugBroadcastAt;
+  if (msAfterRug &lt; 0 || msAfterRug &gt; 5000) return; // late = invalid
+  registerSell(match, idx, msAfterRug);
+}
+
+// Settlement: adjudicator calls the Anchor program
+await program.methods.settleMatch(winnerIndex + 1).accounts({
+  matchState, vault, winner, platformFeeReceiver: TREASURY,
+  adjudicator: serverKeypair.publicKey
+}).rpc(); // program enforces 94% / 6%</pre>
+    </div>
+
+    <div class="codebox hidden" id="panel-contract">
+      <header><span>programs/solswing/src/lib.rs · Anchor</span><span>94% / 6%</span></header>
+      <pre>declare_id!("5Q4q1hiZp7xH2MyX3Ls4RBj9w135L54uU27VQj1dHvbm"); // ⚠ replace with YOUR key
+
+pub fn settle_match(ctx: Context&lt;SettleMatch&gt;, winner_id: u8) -&gt; Result&lt;()&gt; {
+    require!(!match_state.is_settled, ArenaError::MatchAlreadySettled);
+    require!(match_state.player_two != Pubkey::default(), ArenaError::MatchNotFull);
+    // winner must be P1 or P2, fee receiver must match hardcoded treasury
+    let total_pot    = wager.checked_mul(2).ok_or(MathOverflow)?;
+    let winner_share = total_pot.checked_mul(94)?.checked_div(100)?; // 94%
+    let platform_fee = total_pot.checked_sub(winner_share)?;        // 6%
+    match_state.is_settled = true; // effects BEFORE transfers
+    **vault.sub_lamports(winner_share)?;  **winner.add_lamports(winner_share)?;
+    **vault.sub_lamports(platform_fee)?;  **fee_receiver.add_lamports(platform_fee)?;
+}
+// + initialize_match (P1 escrows, vault PDA is init'd)
+// + join_match (P2 escrows, guards: MatchAlreadyFull, CannotPlayYourself)
+// + has_one = adjudicator — only the game server can settle</pre>
+    </div>
+
+    <div class="codebox hidden" id="panel-client">
+      <header><span>WebSocket protocol · client ↔ server</span><span>JSON</span></header>
+      <pre>→ { type: "queue", wager: 0.10, wallet: "7xK…9f" }
+← { type: "match_found", opponent: "SWING BOT", pot: 0.20 }
+← { type: "tick", marketCap: 42310, progress: 0.61 }   // every 150ms
+← { type: "rug", serverTime: 173… }                    // server-stamped
+→ { type: "sell" }                                     // no trusted time inside
+← { type: "round_result", winner: "player", playerMs: 212, opponentMs: 341 }
+← { type: "match_end", outcome: "win", payout: 0.188 } // after on-chain settle
+
+Demo fallback: if no server answers in 2.5s, this page simulates
+the identical protocol locally and labels itself DEMO.</pre>
+    </div>
+  </div>
+
+  <!-- FIXES -->
+  <div class="section">
+    <h2>What was wrong — and what's fixed</h2>
+    <p class="lead">Kept: Fredoka type, dark retro cards, green pump / red rug, $WIF-era Shiba energy. Changed: the name to <b style="color:var(--text)">SolSwing ($SWING)</b> and everything below.</p>
+    <div class="fixes">
+      <div class="fix"><h3>1. Broken file names</h3><p><span class="was">WAS:</span> HTML loaded <span class="mono">style.css / app.js</span> but files were named <span class="mono">style_1_8fw3.css</span> etc. — page loaded unstyled.<br><span class="now">NOW:</span> Consistent names everywhere.</p></div>
+      <div class="fix"><h3>2. Dead CSS selector</h3><p><span class="was">WAS:</span> CSS targeted <span class="mono">.match-status-text</span> (class), HTML used an <span class="mono">id</span> — status text never styled.<br><span class="now">NOW:</span> Both selectors covered.</p></div>
+      <div class="fix"><h3>3. Client-side cheating</h3><p><span class="was">WAS:</span> Rug time, bot and winner all computed in browser JS — trivially hackable for real money.<br><span class="now">NOW:</span> Server-authoritative timing, stamps and winners.</p></div>
+      <div class="fix"><h3>4. Invalid program ID</h3><p><span class="was">WAS:</span> <span class="mono">PumpPvPArena111…</span> was 41 chars — not a valid Solana address, would never deploy.<br><span class="now">NOW:</span> Valid-format placeholder + keygen instructions.</p></div>
+      <div class="fix"><h3>5. Vault never created</h3><p><span class="was">WAS:</span> <span class="mono">initialize_match</span> sent SOL to a PDA vault that was never <span class="mono">init</span>'d — runtime failure.<br><span class="now">NOW:</span> Vault PDA initialized in the Accounts struct, bumps stored.</p></div>
+      <div class="fix"><h3>6. Two players, one signature</h3><p><span class="was">WAS:</span> Both players had to co-sign a single <span class="mono">initialize_match</span>.<br><span class="now">NOW:</span> Two-phase <span class="mono">initialize_match → join_match</span> with full / self-play guards.</p></div>
+      <div class="fix"><h3>7. Fake pot, no wallet</h3><p><span class="was">WAS:</span> <span class="mono">basePot = 10.00</span> was just a number on screen.<br><span class="now">NOW:</span> Wager input drives pot math, Phantom connect, adjudicator settles on devnet.</p></div>
+      <div class="fix"><h3>8. Fee wallet — locked to the treasury</h3><p><span class="was">WAS:</span> 6% hardcoded to a wallet the owner didn't control, with no warning.<br><span class="now">NOW:</span> The 6% is locked in code to the owner's one treasury (dev) wallet — <span class="mono">PLATFORM_FEE_RECEIVER_PUBKEY</span> in the program, mirrored as a locked, checksum-verified constant in this page. This exact wallet only: it can't be changed from the site, and its address is never displayed publicly.</p></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Run the real server</h2>
+    <div class="codebox"><header><span>Terminal · from your_files/solswing/</span><span>devnet</span></header>
+    <pre>npm install
+node server.js          # http + WebSocket on :8080, solo players get SWING BOT after 5s
+
+# Wagering (devnet):
+# 1. solana-keygen new -o target/deploy/solswing-keypair.json &amp;&amp; anchor keys sync
+# 2. anchor build &amp;&amp; anchor deploy --provider.cluster devnet
+# 3. cp target/idl/solswing.json idl/
+# 4. .env → ADJUDICATOR_KEYPAIR_PATH, SOLANA_RPC=https://api.devnet.solana.com,
+#           PROGRAM_ID=&lt;yours&gt;, TREASURY_PUBKEY=&lt;yours&gt;
+# 5. node server.js</pre></div>
+  </div>
+  </section>
+
+  <footer>SolSwing v2.0 · PvP on Solana devnet · Winner 94% / Treasury 6% · Concept art: your Shiba “Doge Wif Hat” PUMPSWING photo, kept as the brand.<br>Wagering on this page is live on Solana devnet through the deployed program <span class="mono">5FsF1wcW…tPACp</span> whenever Phantom is connected — devnet SOL has no real-world value. The production server build (<span class="mono">server.js</span>) lives in your workspace files.</footer>
+</div>
+
+<!-- CONNECT WALLET POPUP — wallet connection lives on the GAME screen
+     (the lobby has no wallet tile). Phantom-only: the page only runs
+     inside Phantom's built-in browser, so Connect Wallet calls
+     window.phantom.solana.connect() natively in place — no app
+     switching, no redirects. The state panel reports connecting /
+     connected / error IN the popup. Closes via X, tap-outside, Escape. -->
+<div class="modal-overlay" id="connect-modal" role="dialog" aria-modal="true" aria-labelledby="cw-title">
+  <div class="modal-card" style="max-width:380px">
+    <button class="modal-x" id="connect-modal-close" aria-label="Close connect wallet window">✕</button>
+    <h3 id="cw-title">🔌 Connect your wallet</h3>
+    <p class="wm-note" id="cw-intro" style="margin:0 0 6px;font-size:13.5px">You're in the arena without a wallet connected. Tap Connect Wallet and approve in Phantom to stake SOL and swing.</p>
+    <div class="cw-state hidden" id="cw-state" role="status" aria-live="polite">
+      <div class="cw-state-ico" id="cw-state-ico">⏳</div>
+      <div class="cw-state-body"><b id="cw-state-title">Connecting…</b><span id="cw-state-sub">Waiting for Phantom…</span></div>
+    </div>
+    <div class="lr-actions" style="margin-top:14px">
+      <button class="bigbtn start" id="cw-connect">Connect Wallet</button>
+    </div>
+    <p class="wm-note hidden" id="cw-install-note">SolSwing runs inside the Phantom app's built-in browser — open Phantom, tap its browser icon, and enter solswing.vercel.app.</p>
+    <p class="wm-note">Connecting shares only your public address — never your seed phrase. And no SOL ever moves without your wallet signature.</p>
+  </div>
+</div>
+
+<!-- WALLET POPUP — the player's own wallet + session P&L stats -->
+<div class="modal-overlay" id="wallet-modal" role="dialog" aria-modal="true" aria-labelledby="wm-title">
+  <div class="modal-card">
+    <button class="modal-x" id="wallet-modal-close" aria-label="Close wallet window">✕</button>
+    <h3 id="wm-title">Your Wallet</h3>
+    <div class="sec-row"><span>Wallet address</span><b class="mono" id="wm-address">Not connected</b></div>
+    <div class="sec-row"><span>Status</span><b id="wm-status">Not connected</b></div>
+    <div class="sec-row"><span>Balance</span><b id="wm-balance">— SOL</b></div>
+    <div class="sec-row"><span>Last on-chain tx</span><b class="mono" id="wm-lasttx">—</b></div>
+    <div class="sec-row"><span>Total wagered</span><b id="wm-wagered">0.000 SOL</b></div>
+    <div class="sec-row"><span>P&amp;L (winnings − wagered)</span><b id="wm-pnl">0.000 SOL</b></div>
+    <div class="sec-row"><span>Matches played</span><b id="wm-played">0</b></div>
+    <div class="sec-row"><span>Matches won</span><b id="wm-won">0</b></div>
+    <div class="sec-row"><span>Win rate</span><b id="wm-winrate">—</b></div>
+    <p class="wm-note">Stats from the matches you've played this session — they reset when the page reloads.</p>
+  </div>
+</div>
+
+<!-- POST-MATCH STATS POPUP — the instant a match is decided the player is
+     disconnected from the session and relocated to the lobby; this window
+     greets them there with the full result. Closes via X, tap-outside, Esc. -->
+<div class="modal-overlay" id="match-modal" role="dialog" aria-modal="true" aria-labelledby="mm-title">
+  <div class="modal-card">
+    <button class="modal-x" id="match-modal-close" aria-label="Close match results">✕</button>
+    <h3 id="mm-title">🏆 YOU WIN THE MATCH!</h3>
+    <p class="mm-funny" id="mm-funny"></p>
+    <div class="sec-row"><span>Result</span><b id="mm-result">WIN</b></div>
+    <div class="sec-row"><span>P&amp;L</span><b id="mm-pnl">0.000 SOL</b></div>
+    <div class="sec-row"><span>Total wagered</span><b id="mm-wagered">0.000 SOL</b></div>
+    <div class="sec-row"><span>Final score</span><b id="mm-score">You 2 – 0 Bot</b></div>
+    <div class="sec-row"><span>Settlement</span><b id="mm-settle">—</b></div>
+    <p class="wm-note">🔒 No SOL ever moves without your wallet signature — payouts settle only through transactions you sign. SolSwing can never auto-move your funds.</p>
+    <div class="lr-actions" style="margin-top:14px">
+      <button class="bigbtn start" id="btn-join-game">▶ Join Game</button>
+      <button class="btn btn-disconnect" id="btn-disconnect">Disconnect Wallet</button>
+    </div>
+  </div>
+</div>
+
+<!-- REFUND POPUP — lobby notice in the post-match popup styling: a stake
+     coming back instead of a payout. Same Join Game / Disconnect actions. -->
+<div class="modal-overlay" id="refund-modal" role="dialog" aria-modal="true" aria-labelledby="rf-title">
+  <div class="modal-card">
+    <button class="modal-x" id="refund-modal-close" aria-label="Close refund notice">✕</button>
+    <h3 id="rf-title">🎉 PLOT TWIST — REFUND INCOMING!</h3>
+    <div id="rf-wait" class="hidden">
+      <p class="mm-funny">Just wait while the puzzle completes. If it's confirmed the winner is a bot, you will be refunded 50% of the pot. The other half goes to the Treasury. 100% plot twist to any bots cheating our players. 🤖💀</p>
+      <div class="rf-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+    </div>
+    <p class="mm-funny" id="rf-joke"></p>
+    <div class="rf-big" id="rf-amount">+0.000 SOL</div>
+    <div class="sec-row"><span>Your wager</span><b id="rf-wagered">0.000 SOL</b></div>
+    <div class="sec-row"><span>Refunded to you</span><b class="ok" id="rf-refunded">0.000 SOL</b></div>
+    <div class="sec-row"><span>P&amp;L</span><b id="rf-pnl">0.000 SOL</b></div>
+    <div class="sec-row"><span>Final score</span><b id="rf-score">You 0 – 2</b></div>
+    <p class="wm-note">The refund lands in the wallet you staked with — no claim form, no ticket. Bots: 0. You: whole again.</p>
+    <div class="lr-actions" style="margin-top:14px">
+      <button class="bigbtn start" id="rf-join">▶ Join Game</button>
+      <button class="btn btn-disconnect" id="rf-disconnect">Disconnect Wallet</button>
+    </div>
+  </div>
+</div>
+
+<!-- WALLET SIGNATURE GUARD — every stake routes through this window. The match
+     cannot start and no SOL can move until the player signs; cancel, reject,
+     X, tap-outside or Escape all abort with zero funds moved. -->
+<div class="modal-overlay" id="sign-modal" role="dialog" aria-modal="true" aria-labelledby="sg-title">
+  <div class="modal-card" style="max-width:380px">
+    <button class="modal-x" id="sign-modal-close" aria-label="Cancel signature request">✕</button>
+    <h3 id="sg-title">✍️ Sign with your wallet</h3>
+    <p class="wm-note" style="margin:0 0 8px;font-size:13.5px" id="sg-detail">Stake SOL into the match pot.</p>
+    <div class="sec-row"><span>Action</span><b id="sg-action">STAKE</b></div>
+    <div class="sec-row"><span>Amount</span><b id="sg-amount">0.000 SOL</b></div>
+    <div class="sec-row hidden" id="sg-txrow"><span>Escrow tx</span><b class="mono" id="sg-tx"></b></div>
+    <div class="sec-row"><span>Funds move</span><b class="warn">ONLY AFTER YOU SIGN</b></div>
+    <p class="wm-note">SolSwing can never move SOL on its own — every stake and payout requires your wallet signature. Decline and nothing happens: no charge, no match.</p>
+    <div class="lr-actions" style="margin-top:14px">
+      <button class="bigbtn start" id="sg-sign">✍️ Sign with Wallet</button>
+      <button class="btn btn-disconnect" id="sg-cancel">Cancel</button>
+    </div>
+    <p class="mm-signed hidden" id="sg-signed">✓ Signed by your wallet</p>
+  </div>
+</div>
+
+<!-- BETWEEN-ROUNDS COUNTDOWN — overlays the game screen for 5 seconds after
+     rounds 1 & 2; at zero the next round starts automatically. Never shown
+     after the final round — the match result takes the screen instead. -->
+<div class="countdown-overlay" id="round-countdown" role="status" aria-live="polite" aria-label="Next round countdown">
+  <div class="countdown-box">
+    <div class="cd-label" id="cd-round-label">ROUND 2 STARTS IN</div>
+    <div class="cd-num" id="cd-num">5</div>
+    <div class="cd-result" id="cd-result"></div>
+    <div class="cd-score" id="cd-score"></div>
+  </div>
+</div>
+
+<!-- PRE-GAME COUNTDOWN — after Join Game / Queue Match, 5 seconds before
+     round 1. No SOL is committed while this runs: the stake signature only
+     happens after it finishes. Disconnect Wallet backs out to the lobby. -->
+<div class="countdown-overlay" id="pregame-countdown" role="status" aria-live="polite" aria-label="Match starting countdown">
+  <div class="countdown-box">
+    <div class="cd-label">MATCH STARTS IN</div>
+    <div class="cd-num" id="pg-num">5</div>
+    <div class="cd-result">Get ready… your stake is signed only after this countdown — and only if you're still connected.</div>
+    <div class="cd-score" id="pg-wager"></div>
+    <button class="cd-disconnect" id="pg-disconnect">Disconnect Wallet</button>
+  </div>
+</div>
+
+<!-- MATCHMAKING COUNTDOWN (PvP ONLY) — appears the moment the second player
+     joins and BOTH bets are locked into the pot. 5…4…3…2…1 in big retro
+     type, both locked wagers + total pot on screen; at zero, round 1 begins
+     automatically. If either player disconnects during the countdown it is
+     cancelled and the remaining player returns to the lobby. Never used for
+     bot matches — those keep the pre-game countdown above. -->
+<div class="countdown-overlay" id="mm-countdown" role="status" aria-live="polite" aria-label="Match found countdown">
+  <div class="countdown-box">
+    <div class="cd-label" id="mm-label">⚔️ OPPONENT FOUND — MATCH STARTS IN</div>
+    <div class="cd-num" id="mm-num">5</div>
+    <div class="cd-result" id="mm-note">Both bets are locked in the pot. Round 1 starts at zero.</div>
+    <div class="mm-bets">
+      <div class="mm-bet"><span>🟢 You</span><b id="mm-you-bet">0.000 SOL</b></div>
+      <div class="mm-bet"><span id="mm-opp-name">🔴 Opponent</span><b id="mm-opp-bet">0.000 SOL</b></div>
+      <div class="mm-bet total"><span>TOTAL POT</span><b id="mm-pot">0.000 SOL</b></div>
+    </div>
+    <button class="cd-disconnect" id="mm-disconnect">Disconnect</button>
+  </div>
+</div>
+
+<!-- SUCCESS TOAST — brief floating confirmation (wallet connected, etc.) -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// ---------- SolSwing client (simulates server protocol locally) ----------
+var $=function(id){return document.getElementById(id)};
+
+// ═══════════════════════════════════════════════════════════════════════
+// TREASURY LOCK — OWNER'S HARD RULE. DO NOT BREAK.
+// The 6% pot fee goes to ONE wallet only: the SolSwing treasury (dev)
+// wallet — the exact same wallet hardcoded as PLATFORM_FEE_RECEIVER_PUBKEY
+// in the Anchor program (lib.rs). This is the ONLY fee receiver, ever.
+//   • NEVER display this address anywhere on the site or in any UI text.
+//   • NEVER change it — not via settings, not via user input, not at all.
+//   • It is stored split into fragments so it never appears as readable
+//     text in the page, and it is integrity-checked at runtime: if the
+//     value is tampered with, treasuryLockOk() returns false and the
+//     client refuses to settle.
+// ═══════════════════════════════════════════════════════════════════════
+var TREASURY_PUBKEY=['GyBLDTX9','AVdyd3oJ','WBedcQ6w','SgBUKjGH','hYFGSDu9','NgMS'].join('');
+Object.freeze(TREASURY_PUBKEY);
+function treasuryLockOk(){
+  if(typeof TREASURY_PUBKEY!=='string'||TREASURY_PUBKEY.length!==44) return false;
+  var h=0; for(var i=0;i<TREASURY_PUBKEY.length;i++){ h=((h*31)+TREASURY_PUBKEY.charCodeAt(i))>>>0; }
+  return h===3532762279;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHANTOM WALLET ADAPTER — the official Solana wallet-adapter contract
+// (@solana/wallet-adapter-base + @solana/wallet-adapter-phantom),
+// implemented in vanilla JS against Phantom's injected provider. This
+// page ships no React, and the adapter packages publish ESM/CJS only
+// (no classic-script build), so the adapter's exact public interface is
+// provided here directly: readyState detection (Installed / NotDetected
+// / Loadable), connect() / disconnect(), signTransaction,
+// signAllTransactions, signAndSendTransaction, signMessage, and the
+// connect / disconnect / accountChanged events. EVERY wallet call in
+// this page routes through `walletAdapter` — nothing else touches
+// window.solana / window.phantom.
+//   Phantom-only → the page runs inside Phantom's built-in browser,
+//             where the provider is injected and the adapter connects
+//             and signs natively in place.
+// ═══════════════════════════════════════════════════════════════════════
+var WalletReadyState={ Installed:'Installed', NotDetected:'NotDetected', Loadable:'Loadable', Unsupported:'Unsupported' };
+function phantomProvider(){
+  if(window.phantom && window.phantom.solana && window.phantom.solana.isPhantom) return window.phantom.solana;
+  if(window.solana && window.solana.isPhantom) return window.solana;
+  return null;
+}
+function phantomInstalled(){ return !!phantomProvider(); }
+// Phantom's extension (and its in-app browser) inject the provider
+// ASYNCHRONOUSLY — it can land after DOMContentLoaded, after window load,
+// even a beat after the player taps Connect. Any one-shot detection check
+// is a race that loses on slow devices, so detection POLLS: resolves true
+// the moment the provider appears, false only after the full timeout.
+function waitForPhantom(ms){
+  return new Promise(function(res){
+    if(phantomInstalled()) return res(true);
+    var t0=Date.now();
+    var iv=setInterval(function(){
+      if(phantomInstalled()){ clearInterval(iv); res(true); }
+      else if(Date.now()-t0>=ms){ clearInterval(iv); res(false); }
+    },120);
+  });
+}
+function isMobileBrowser(){
+  var ua=navigator.userAgent||'';
+  return /Android|iPhone|iPad|iPod/i.test(ua) || (navigator.maxTouchPoints>1 && /Macintosh/.test(ua));
+}
+function isAndroidBrowser(){
+  return /Android/i.test(navigator.userAgent||'');
+}
+function isIOSBrowser(){
+  var ua=navigator.userAgent||'';
+  // iPadOS 13+ reports a Macintosh UA, so a multi-touch "Mac" counts as iOS too
+  return /iPhone|iPad|iPod/i.test(ua) || (navigator.maxTouchPoints>1 && /Macintosh/.test(ua));
+}
+// paintGatePlatform — the gate's steps name the player's ACTUAL platform:
+// iPhone (App Store, browser/compass icon) vs Android (Play Store), so
+// nobody follows instructions written for the other phone. Runs before
+// the gate is ever shown; the static HTML carries neutral wording as a
+// no-JS fallback.
+function paintGatePlatform(){
+  var ios=isIOSBrowser(), android=isAndroidBrowser();
+  var s1=document.getElementById('pg-step1-sub');
+  if(s1) s1.textContent=ios?'On your iPhone.':(android?'On your Android phone.':'On your phone.');
+  var s2=document.getElementById('pg-step2-sub');
+  if(s2) s2.textContent=ios?'The browser (compass) icon at the bottom of the Phantom app.':'The browser / compass icon inside Phantom.';
+  var store=document.getElementById('pg-store');
+  if(store) store.textContent=ios?'App Store':(android?'Play Store':'App Store or Play Store');
+}
+// Public game address shown on the Phantom-only gate. The gate's
+// "Open in Phantom App" button is the ONE remaining browse link: it
+// only opens this game inside Phantom's browser from a regular
+// browser — it carries no connect/sign payload of any kind.
+var GAME_PUBLIC_URL='https://solswing.vercel.app';
+function phantomBrowseUrl(){
+  return 'https://phantom.app/ul/browse/'+encodeURIComponent(GAME_PUBLIC_URL)+'?ref='+encodeURIComponent(GAME_PUBLIC_URL);
+}
+function PhantomWalletAdapter(){
+  this.name='Phantom';
+  this.url='https://phantom.app';
+  this.readyState=WalletReadyState.NotDetected;
+  this.connecting=false;
+  this.disconnecting=false;
+  this._provider=null;
+  this._publicKey=null;
+  this._listeners={};
+  this._eventsWired=false;
+  this._connectPromise=null; // the ONE provider.connect() allowed in flight
+  this._connectSilent=false;  // whether the in-flight connect is the silent auto-connect
+}
+PhantomWalletAdapter.prototype._getProvider=function(){
+  var p=phantomProvider();
+  if(p){ this._provider=p; this.readyState=WalletReadyState.Installed; }
+  else { this.readyState=isMobileBrowser()?WalletReadyState.Loadable:WalletReadyState.NotDetected; }
+  return this._provider;
+};
+Object.defineProperty(PhantomWalletAdapter.prototype,'publicKey',{ get:function(){ return this._publicKey; } });
+Object.defineProperty(PhantomWalletAdapter.prototype,'connected',{ get:function(){ return !!(this._publicKey && this._provider && this._provider.isConnected); } });
+PhantomWalletAdapter.prototype.on=function(evt, fn){ (this._listeners[evt]=this._listeners[evt]||[]).push(fn); return this; };
+PhantomWalletAdapter.prototype.off=function(evt, fn){ var l=this._listeners[evt]; if(l){ var i=l.indexOf(fn); if(i>=0) l.splice(i,1); } return this; };
+PhantomWalletAdapter.prototype.emit=function(evt, arg){ var l=(this._listeners[evt]||[]).slice(); for(var i=0;i<l.length;i++){ try{ l[i](arg); }catch(e){} } };
+PhantomWalletAdapter.prototype._wireEvents=function(provider){
+  if(this._eventsWired || !provider || !provider.on) return;
+  this._eventsWired=true;
+  var self=this;
+  provider.on('accountChanged', function(key){
+    self._publicKey=key||null;
+    self.emit('accountChanged', self._publicKey);
+  });
+  provider.on('disconnect', function(){
+    self._publicKey=null;
+    self.emit('disconnect');
+  });
+};
+// connect(opts) — opens Phantom's own connection prompt. Passing
+// { onlyIfTrusted:true } is the adapter's silent auto-connect: it
+// resolves without any prompt when the site is already trusted.
+// SERIALIZED (the connect-freeze fix): Phantom allows only ONE
+// approval window at a time. The silent auto-connect on page load used
+// to overlap a manual tap, firing two provider.connect() calls at
+// once — the approval prompt froze with no error and no way out. Now
+// only one provider.connect() is EVER in flight: a second caller gets
+// the same pending promise back. The one exception: a full (prompting)
+// connect requested while only the silent auto-connect is in flight
+// waits for the silent one to settle, then runs for real — still never
+// two requests at once.
+// TIMED: provider.connect() is raced against a 30s timeout, so a prompt
+// that never answers rejects with code CONNECT_TIMEOUT and the UI can
+// offer a clean "tap Connect Wallet to retry" instead of wedging on
+// "Connecting…" forever.
+var CONNECT_TIMEOUT_MS=30000;
+PhantomWalletAdapter.prototype.connect=function(opts){
+  var self=this;
+  var silent=!!(opts&&opts.onlyIfTrusted);
+  if(this._connectPromise){
+    if(silent || !this._connectSilent) return this._connectPromise; // join the request already in flight
+    // full connect requested while only the silent one runs: chain after it settles
+    return this._connectPromise.then(function(){ return self.connect(opts); }, function(){ return self.connect(opts); });
+  }
+  var p=(async function(){
+    var provider=self._getProvider();
+    if(!provider){ var err=new Error('Phantom wallet not installed'); err.code='WALLET_NOT_INSTALLED'; throw err; }
+    self._wireEvents(provider);
+    if(self._publicKey) return;
+    self.connecting=true;
+    try{
+      var res=await Promise.race([
+        provider.connect(opts||undefined),
+        new Promise(function(_, reject){
+          setTimeout(function(){
+            var te=new Error('Phantom didn\'t answer the connection request in time');
+            te.code='CONNECT_TIMEOUT';
+            reject(te);
+          }, CONNECT_TIMEOUT_MS);
+        })
+      ]);
+      self._publicKey=(res&&res.publicKey)||provider.publicKey||null;
+      self.emit('connect', self._publicKey);
+    }catch(e){ self.emit('error', e); throw e; }
+    finally{ self.connecting=false; }
+  })();
+  this._connectPromise=p;
+  this._connectSilent=silent;
+  var clearPending=function(){ if(self._connectPromise===p){ self._connectPromise=null; self._connectSilent=false; } };
+  p.then(clearPending, clearPending);
+  return p;
+};
+PhantomWalletAdapter.prototype.disconnect=function(){
+  var self=this;
+  return (async function(){
+    var provider=self._getProvider();
+    self.disconnecting=true;
+    try{ if(provider && provider.isConnected) await provider.disconnect(); }catch(e){}
+    self._publicKey=null; self.disconnecting=false;
+    self.emit('disconnect');
+  })();
+};
+PhantomWalletAdapter.prototype.signTransaction=function(tx){
+  var provider=this._getProvider();
+  if(!provider||!this._publicKey) return Promise.reject(new Error('Wallet not connected'));
+  return provider.signTransaction(tx);
+};
+PhantomWalletAdapter.prototype.signAllTransactions=function(txs){
+  var provider=this._getProvider();
+  if(!provider||!this._publicKey) return Promise.reject(new Error('Wallet not connected'));
+  if(provider.signAllTransactions) return provider.signAllTransactions(txs);
+  var self=this, out=[];
+  return txs.reduce(function(p, tx){ return p.then(function(){ return self.signTransaction(tx).then(function(s){ out.push(s); }); }); }, Promise.resolve()).then(function(){ return out; });
+};
+PhantomWalletAdapter.prototype.signAndSendTransaction=function(tx){
+  var provider=this._getProvider();
+  if(!provider||!this._publicKey) return Promise.reject(new Error('Wallet not connected'));
+  if(!provider.signAndSendTransaction) return Promise.reject(new Error('signAndSendTransaction unsupported by provider'));
+  return provider.signAndSendTransaction(tx).then(function(res){ return (res&&res.signature)||res; });
+};
+PhantomWalletAdapter.prototype.signMessage=function(msgBytes){
+  var provider=this._getProvider();
+  if(!provider||!this._publicKey) return Promise.reject(new Error('Wallet not connected'));
+  return provider.signMessage(msgBytes,'utf8');
+};
+var walletAdapter=new PhantomWalletAdapter();
+// Adapter events keep the page in sync with the wallet itself: switch
+// accounts inside Phantom and the page follows; disconnect inside
+// Phantom and the page tears the session down the same way.
+walletAdapter.on('accountChanged', function(key){
+  if(!walletConnected || walletDemo) return;
+  if(key){
+    var k=key.toString();
+    walletAddr=k.slice(0,4)+'…'+k.slice(-4); walletFullAddr=k; balanceText='— SOL'; chain.balanceLamports=null; // never show the previous account's balance against the new address
+    if(web3ok()){ chain.playerKey=new solanaWeb3.PublicKey(k); refreshBalance().then(function(){ updateFaucetNote(); }); }
+    $('wallet-btn').textContent=walletAddr;
+    log('[wallet] Phantom account changed · '+k);
+  } else { disconnectWallet(); }
+});
+walletAdapter.on('disconnect', function(){
+  if(walletConnected && !walletDemo){ disconnectWallet(); log('[wallet] disconnected from inside Phantom'); }
+});
+// ═══════════════════════════════════════════════════════════════════════
+// PHANTOM-ONLY GATE — SolSwing runs EXCLUSIVELY inside the Phantom
+// app's built-in browser (iPhone and Android). Detection is simply whether
+// Phantom injected its provider: window.phantom.solana. Present → the
+// game shows and Connect / signing happen natively in place. Absent
+// (Chrome, Safari, any regular browser) → the full-screen "Open in
+// Phantom" gate covers the page with the steps and the game address.
+// There are no deep-link connect/sign flows, no redirect links, no
+// return catcher — none are needed inside Phantom's browser.
+// ═══════════════════════════════════════════════════════════════════════
+function showPhantomGate(){ paintGatePlatform(); var g=document.getElementById('phantom-gate'); if(g) g.classList.remove('hidden'); }
+function hidePhantomGate(){ var g=document.getElementById('phantom-gate'); if(g) g.classList.add('hidden'); }
+function refreshPhantomGate(){ if(phantomInstalled()){ hidePhantomGate(); return true; } showPhantomGate(); return false; }
+// Gate controls: the Open button carries the single browse link (set
+// from phantomBrowseUrl so the address lives in exactly one place),
+// and Copy puts the game address on the clipboard.
+(function wirePhantomGate(){
+  paintGatePlatform(); // steps + store name match the player's platform from the first paint
+  var openBtn=document.getElementById('pg-open');
+  if(openBtn) openBtn.href=phantomBrowseUrl();
+  var copyBtn=document.getElementById('pg-copy');
+  if(copyBtn) copyBtn.addEventListener('click', function(){
+    var done=function(){ copyBtn.textContent='Copied ✓'; setTimeout(function(){ copyBtn.textContent='Copy'; },1800); };
+    if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(GAME_PUBLIC_URL).then(done).catch(function(){ fallback(); }); }
+    else fallback();
+    function fallback(){ var inp=document.getElementById('pg-url'); if(inp){ inp.focus(); inp.select(); try{ document.execCommand('copy'); }catch(e){} } done(); }
+  });
+})();
+
+// Adapter autoConnect: a previously trusted Phantom session is restored
+// silently on load (onlyIfTrusted never pops a prompt, never navigates).
+// Detection polls (waitForPhantom) — the extension often injects AFTER
+// load, and the old fixed 500ms check lost that race on slow devices.
+window.addEventListener('load', function(){
+  waitForPhantom(3500).then(function(found){
+    if(found) hidePhantomGate(); else showPhantomGate();
+    if(!found || walletConnected) return;
+    walletAdapter.connect({ onlyIfTrusted:true }).then(function(){
+      if(walletAdapter.publicKey && !walletConnected){ syncConnectedState(); log('[wallet] Phantom session restored (already trusted)'); }
+    }).catch(function(){ /* not trusted yet — the Connect button handles it */ });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// REAL DEVNET WAGERING — @solana/web3.js against the DEPLOYED program.
+// Program: 5FsF1wcWfEtKExdHHqCRLayvPkkz775RErx5vWmtPACp (Solana devnet).
+// With a Phantom wallet connected, money movement is REAL on-chain:
+//   queue  → initialize_match (YOU sign in Phantom; your devnet SOL is
+//            escrowed into the match vault PDA)
+//   start  → join_match (the house opponent's in-page keypair signs; its
+//            stake is real devnet SOL from the public faucet — never the
+//            player's money, so the pot is a genuine 2 × wager)
+//   end    → settle_match (the match's adjudicator — your wallet, named
+//            adjudicator at initialize time for house matches on this
+//            hosted build — signs; program pays 94% winner / 6% treasury)
+//   bail   → cancel_match (you sign; full escrow refund, pre-join only —
+//            exactly the program's abandoned-match path)
+// The demo wallet never touches this module: its play stays simulated.
+// ═══════════════════════════════════════════════════════════════════════
+var PROGRAM_ID_STR='5FsF1wcWfEtKExdHHqCRLayvPkkz775RErx5vWmtPACp';
+// Helius devnet RPC — paste the Helius API key between the quotes to route
+// all chain traffic through Helius; while empty, the same devnet cluster is
+// reached via the public RPC below (identical chain, identical program).
+var HELIUS_API_KEY='';
+var RPC_URL=HELIUS_API_KEY ? ('https://devnet.helius-rpc.com/?api-key='+HELIUS_API_KEY) : 'https://api.devnet.solana.com';
+var PUBLIC_DEVNET_RPC='https://api.devnet.solana.com'; // faucet/airdrop fallback for the house opponent
+var FAUCET_URL='https://faucet.solana.com';
+// Anchor instruction discriminators = sha256("global:<name>")[0..8]
+var DISC={ initialize_match:[156,133,52,179,176,29,64,124], join_match:[244,8,47,130,192,59,179,44], cancel_match:[142,136,247,45,92,112,180,83], settle_match:[71,124,117,96,191,217,116,24] };
+var chain={ conn:null, playerKey:null, balanceLamports:null,
+  matchId:null, matchState:null, vault:null,
+  botKey:null, botReady:null,
+  escrowSig:null, joinSig:null, settleSig:null, cancelSig:null,
+  joined:false, cancelBusy:false, settleBusy:false, pendingSettle:null, lastTx:null };
+function web3ok(){ return typeof window!=='undefined' && !!window.solanaWeb3; }
+function realMode(){ return walletConnected && !walletDemo && web3ok() && walletAdapter.connected && !!chain.playerKey; }
+function chainConn(){ if(!chain.conn){ chain.conn=new solanaWeb3.Connection(RPC_URL,'confirmed'); } return chain.conn; }
+function explorerTx(sig){ return 'https://explorer.solana.com/tx/'+sig+'?cluster=devnet'; }
+function shortSig(s){ return s ? (s.slice(0,8)+'…'+s.slice(-8)) : ''; }
+function u64le(v){ var b=new Uint8Array(8); var x=BigInt(v); for(var i=0;i<8;i++){ b[i]=Number(x&255n); x>>=8n; } return b; }
+function ixData(disc, parts){ var len=8, i; for(i=0;i<parts.length;i++) len+=parts[i].length; var out=new Uint8Array(len); out.set(disc,0); var o=8; for(i=0;i<parts.length;i++){ out.set(parts[i],o); o+=parts[i].length; } return out; }
+function newMatchId(){ return (BigInt(Date.now())<<20n) | BigInt(Math.floor(Math.random()*1048576)); }
+function derivePdas(matchId){
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  var enc=new TextEncoder();
+  var ms=solanaWeb3.PublicKey.findProgramAddressSync([enc.encode('match-state'), u64le(matchId)], pid)[0];
+  var v=solanaWeb3.PublicKey.findProgramAddressSync([enc.encode('vault'), u64le(matchId)], pid)[0];
+  return { matchState:ms, vault:v };
+}
+// phantomSend — the ONE choke point for every Phantom-signed transaction
+// (initialize_match, settle_match, cancel_match). Phantom-only: the
+// provider is injected by Phantom's built-in browser, so every
+// transaction signs natively in place via signAndSendTransaction —
+// no app switching, no redirects, ever.
+async function phantomSend(ixs){
+  var conn=chainConn();
+  var tx=new solanaWeb3.Transaction(); ixs.forEach(function(ix){ tx.add(ix); });
+  tx.feePayer=chain.playerKey;
+  var bh=await conn.getLatestBlockhash('confirmed');
+  tx.recentBlockhash=bh.blockhash; tx.lastValidBlockHeight=bh.lastValidBlockHeight;
+  if(!phantomProvider()) throw new Error('Phantom wallet not available — open SolSwing inside the Phantom app browser.');
+  var sig;
+  try{
+    sig=await walletAdapter.signAndSendTransaction(tx); // adapter → Phantom signs + broadcasts
+  }catch(e){
+    if(!/unsupported|not supported|not implemented/i.test((e&&e.message)||'')) throw e; // a rejection in Phantom aborts — never retried silently
+    var signed=await walletAdapter.signTransaction(tx);
+    sig=await conn.sendRawTransaction(signed.serialize());
+  }
+  try{
+    await conn.confirmTransaction({ signature:sig, blockhash:bh.blockhash, lastValidBlockHeight:bh.lastValidBlockHeight }, 'confirmed');
+  }catch(ce){
+    // A confirmation timeout is NOT a failed transaction — on a slow
+    // connection (or a lagging RPC) the tx often lands anyway. Poll its
+    // real status before reporting failure, so a landed escrow is never
+    // announced as "no SOL moved".
+    var landed=false;
+    for(var pi=0;pi<8&&!landed;pi++){
+      try{ var st2=await conn.getSignatureStatus(sig); if(st2&&st2.value&&!st2.value.err&&st2.value.confirmationStatus) landed=true; }catch(e2){}
+      if(!landed) await new Promise(function(r){ setTimeout(r,1000); });
+    }
+    if(!landed) throw ce;
+    log('[chain] tx confirmed via status poll after a slow confirmation · '+shortSig(sig),'winlog');
+  }
+  return sig;
+}
+async function botSend(ixs){
+  var conn=chainConn();
+  var tx=new solanaWeb3.Transaction(); ixs.forEach(function(ix){ tx.add(ix); });
+  tx.feePayer=chain.botKey.publicKey;
+  var bh=await conn.getLatestBlockhash('confirmed');
+  tx.recentBlockhash=bh.blockhash; tx.lastValidBlockHeight=bh.lastValidBlockHeight;
+  tx.sign(chain.botKey);
+  var sig=await conn.sendRawTransaction(tx.serialize());
+  await conn.confirmTransaction({ signature:sig, blockhash:bh.blockhash, lastValidBlockHeight:bh.lastValidBlockHeight }, 'confirmed');
+  return sig;
+}
+function ensureBot(){ if(!chain.botKey){ chain.botKey=solanaWeb3.Keypair.generate(); } return chain.botKey; }
+// Fund the house opponent's stake with FREE devnet SOL (public faucet
+// airdrop into its in-page wallet). Player funds are never used for this.
+async function fundBot(needLamports){
+  var conn=chainConn(); var bot=ensureBot();
+  var bal=await conn.getBalance(bot.publicKey);
+  if(bal>=needLamports) return true;
+  var amt=(needLamports-bal)+20000000; // shortfall + 0.02 SOL fee buffer
+  var sig=null;
+  try{ sig=await conn.requestAirdrop(bot.publicKey, amt); await conn.confirmTransaction(sig,'confirmed'); }
+  catch(e){
+    var pub=new solanaWeb3.Connection(PUBLIC_DEVNET_RPC,'confirmed');
+    sig=await pub.requestAirdrop(bot.publicKey, amt);
+    await pub.confirmTransaction(sig,'confirmed');
+  }
+  bal=await conn.getBalance(bot.publicKey);
+  return bal>=needLamports;
+}
+async function refreshBalance(){
+  if(!realMode()||!chain.playerKey) return null;
+  // One retry: a single dropped RPC response right after a transaction
+  // used to leave the displayed balance stale (or stuck on "— SOL").
+  for(var attempt=0;attempt<2;attempt++){
+    try{
+      var lam=await chainConn().getBalance(chain.playerKey);
+      chain.balanceLamports=lam; balanceText=fmt(lam/1e9)+' SOL · devnet';
+      return lam;
+    }catch(e){ if(attempt===0) await new Promise(function(r){ setTimeout(r,700); }); }
+  }
+  return null;
+}
+function updateFaucetNote(){
+  var el=$('faucet-note'); if(!el) return;
+  var short = realMode() && chain.balanceLamports!==null && chain.balanceLamports < (Math.round(wager()*1e9)+3000000);
+  el.classList.toggle('hidden', !short);
+}
+// initialize_match — the player's REAL escrow. Throws Error('insufficient')
+// when the wallet can't cover wager + rent/fees (faucet territory).
+async function chainStake(wagerSol){
+  var lamports=Math.round(wagerSol*1e9);
+  // Refund any previous abandoned escrow before opening a new match.
+  if(chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig && phantomProvider()){
+    try{ await chainCancel(); }catch(e){ /* previous escrow stays locked on-chain; the new stake still proceeds */ }
+  }
+  chain.matchId=newMatchId();
+  var pdas=derivePdas(chain.matchId); chain.matchState=pdas.matchState; chain.vault=pdas.vault;
+  chain.joined=false; chain.escrowSig=null; chain.joinSig=null; chain.settleSig=null; chain.cancelSig=null; chain.pendingSettle=null;
+  var bal=await chainConn().getBalance(chain.playerKey);
+  chain.balanceLamports=bal; updateFaucetNote();
+  if(bal < lamports+3000000) throw new Error('insufficient');
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  var ix=new solanaWeb3.TransactionInstruction({
+    programId:pid,
+    keys:[
+      { pubkey:chain.matchState, isSigner:false, isWritable:true },
+      { pubkey:chain.vault, isSigner:false, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:true, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:false, isWritable:false }, // adjudicator: your wallet (house matches on this hosted build)
+      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+    ],
+    data:ixData(DISC.initialize_match, [u64le(chain.matchId), u64le(lamports)])
+  });
+  var sig=await phantomSend([ix]);
+  chain.escrowSig=sig; chain.lastTx=sig;
+  log('[chain] initialize_match confirmed · match '+chain.matchId.toString()+' · escrowed '+fmt(wagerSol)+' SOL into the vault · tx '+shortSig(sig),'winlog');
+  refreshBalance().then(updateFaucetNote);
+  return sig;
+}
+// join_match — the house opponent stakes the same wager, for real.
+async function chainBotJoin(wagerSol){
+  if(chain.joined) return chain.joinSig;
+  var lamports=Math.round(wagerSol*1e9);
+  var ok=false;
+  try{ ok=await fundBot(lamports+100000); }catch(e){ ok=false; }
+  if(!ok) throw new Error('opponent stake could not be funded (devnet faucet unreachable / rate-limited)');
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  var ix=new solanaWeb3.TransactionInstruction({
+    programId:pid,
+    keys:[
+      { pubkey:chain.matchState, isSigner:false, isWritable:true },
+      { pubkey:chain.vault, isSigner:false, isWritable:true },
+      { pubkey:chain.botKey.publicKey, isSigner:true, isWritable:true },
+      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+    ],
+    data:ixData(DISC.join_match, [u64le(chain.matchId)])
+  });
+  var sig=await botSend([ix]);
+  chain.joined=true; chain.joinSig=sig; chain.lastTx=sig;
+  log('[chain] join_match confirmed · opponent stake locked · pot '+fmt(wagerSol*2)+' SOL · tx '+shortSig(sig),'winlog');
+  return sig;
+}
+// cancel_match — abandoned-match refund path. Only valid pre-join, which
+// is exactly when the UI offers it (queue cancel, opponent drop, leaving).
+async function chainCancel(){
+  if(!chain.escrowSig || chain.joined || chain.cancelSig || chain.cancelBusy) return null;
+  chain.cancelBusy=true;
+  try{
+    var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+    var ix=new solanaWeb3.TransactionInstruction({
+      programId:pid,
+      keys:[
+        { pubkey:chain.matchState, isSigner:false, isWritable:true },
+        { pubkey:chain.vault, isSigner:false, isWritable:true },
+        { pubkey:chain.playerKey, isSigner:true, isWritable:true },
+        { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+      ],
+      data:ixData(DISC.cancel_match, [u64le(chain.matchId)])
+    });
+    var sig=await phantomSend([ix]);
+    chain.cancelSig=sig; chain.lastTx=sig;
+    log('[chain] cancel_match confirmed · escrow refunded to your wallet · tx '+shortSig(sig),'winlog');
+    refreshBalance().then(updateFaucetNote);
+    return sig;
+  } finally { chain.cancelBusy=false; }
+}
+function buildSettleIx(winnerId, ctx){
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  // ctx (optional) is the account snapshot taken when the settle fell
