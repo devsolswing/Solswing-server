@@ -1,0 +1,360 @@
+istener('click', sell);
+document.addEventListener('pointerdown', function(){ if(active&&roundTel) roundTel.events.push(Date.now()); }, true);
+document.addEventListener('keydown', function(){ if(active&&roundTel) roundTel.events.push(Date.now()); }, true);
+document.addEventListener('pointermove', function(){ if(active&&roundTel&&roundTel.moves<4000) roundTel.moves++; });
+document.addEventListener('keydown', function(e){ if(e.code==='Space'&&active&&rugged){ e.preventDefault(); sell(); }});
+document.addEventListener('visibilitychange', function(){ if(document.hidden&&active) forfeit('RAGE QUIT DETECTED: tab hidden mid-round.'); });
+
+// Tabs
+document.querySelectorAll('.tab').forEach(function(t){ t.addEventListener('click', function(){ document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')}); t.classList.add('active'); ['server','contract','client'].forEach(function(k){ $('panel-'+k).classList.toggle('hidden', k!==t.dataset.tab); }); }); });
+
+// ---------- Screens: landing → lobby → game ----------
+var walletConnected=false, walletDemo=false, walletAddr='', walletFullAddr='', balanceText='— SOL', demoBalance=10;
+// Player session stats for the wallet popup — built from real match play.
+// P&L = statsPayouts − statsWagered. matchWager holds the live match's stake
+// (counted once, when the match starts) so a match is never double-counted.
+var statsWagered=0, statsPayouts=0, statsPlayed=0, statsWon=0, matchWager=null;
+function recordMatch(wonMatch, payoutAmt){
+  if(matchWager===null) return;
+  statsPlayed++; if(wonMatch){ statsWon++; } statsPayouts+=payoutAmt;
+  matchWager=null;
+}
+var navScreen='landing'; // last screen pushed to browser history (see the push in showScreen)
+function showScreen(name, fromPop){
+  ['landing','lobby','game','chat','info'].forEach(function(s){ $('screen-'+s).classList.toggle('active', s===name); });
+  if(name!=='game') cleanupMatchmaking(); // leaving the game screen mid-queue or mid-countdown cancels matchmaking (wager refunded)
+  // …and if that queue held a REAL on-chain escrow that never filled, the
+  // refund is real too: cancel_match fires as you leave (needs the wallet
+  // still connected — it is; leaving a screen never disconnects it).
+  if(name!=='game' && !active && realMode() && phantomProvider() && chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig){ var cp2=chainCancel(); if(cp2&&cp2.catch) cp2.catch(function(){}); }
+  // Floating nav: back (top-left) + wallet (top-right) appear on every screen
+  // except page 1 (landing).
+  // Back target follows the flow: lobby → landing, game/chat/info → lobby.
+  $('wallet-btn').classList.toggle('hidden', name==='landing');
+  var tbBack=$('tb-back');
+  if(name==='landing'){ tbBack.classList.add('hidden'); }
+  else{
+    tbBack.classList.remove('hidden');
+    tbBack.dataset.target = name==='lobby' ? 'landing' : 'lobby';
+    $('tb-back-label').textContent = name==='lobby' ? 'Back to Start' : 'Back to Lobby';
+  }
+  // Browser/phone back walks the same flow as the floating back button:
+  // every screen change becomes a history entry, so back steps
+  // game/chat/info → lobby → landing instead of leaving the page.
+  // Guarded — sandboxed frames that refuse history writes skip it.
+  if(!fromPop && name!==navScreen){ try{ history.pushState({ss:name},'','#'+name); }catch(e){} }
+  navScreen=name;
+  window.scrollTo({top:0, behavior:'smooth'});
+  if(name==='chat'){ var cb=$('chat-box'); if(cb) cb.scrollTop=cb.scrollHeight; }
+  // Wallet connection lives on the GAME screen (no lobby tile): arriving
+  // there without a wallet connected opens the connect popup.
+  if(name==='game' && !walletConnected) openConnectModal();
+}
+function updateHUD(){
+  // The HUD stat row is gone from the game screen: the score lives in the
+  // bold chart chip, and wallet balance / pot / P&L live in the wallet popup.
+  // This now only keeps the chart chip's score live.
+  var cs=$('chart-score'); if(cs) cs.textContent=wins+' – '+losses;
+}
+window.addEventListener('resize', updateHUD);
+$('tb-back').addEventListener('click', function(){ showScreen(this.dataset.target||'lobby'); });
+document.querySelectorAll('[data-goto]').forEach(function(b){ b.addEventListener('click', function(){ showScreen(b.dataset.goto); var st=b.dataset.scrollto; if(st){ var el=document.getElementById(st); if(el) setTimeout(function(){ el.scrollIntoView({behavior:'smooth', block:'start'}); },80); } }); });
+$('btn-enter').addEventListener('click', function(){ showScreen('lobby'); });
+// Browser back/forward = the floating back button in the browser's own
+// chrome: popstate re-enters the recorded screen WITHOUT pushing a new
+// entry (fromPop), so back and forward walk the flow symmetrically and
+// every guard inside showScreen (matchmaking cancel, escrow refund,
+// connect popup) applies exactly as it does for in-page navigation.
+try{ history.replaceState({ss:'landing'},'','#landing'); }catch(e){}
+window.addEventListener('popstate', function(e){
+  var s=(e&&e.state&&e.state.ss)||'landing';
+  if(['landing','lobby','game','chat','info'].indexOf(s)<0) s='landing';
+  showScreen(s, true);
+});
+
+// Landing score ticker — the cabinet on the art is still playing
+(function(){
+  var el=$('alive-score'); if(!el) return;
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var score=12850;
+  setInterval(function(){ score+=Math.floor(10+Math.random()*90); if(score>99999) score=12850; el.textContent=score.toLocaleString(); }, 900);
+})();
+
+// ---------- Wallet: connect happens on the game screen (popup), never the lobby ----------
+function activateDemoWallet(){
+  // Demo wallet so the full flow is playable without Phantom
+  walletConnected=true; walletDemo=true; walletAddr='Demo7xK…9fWz'; walletFullAddr='Demo7xK…9fWz · demo wallet'; balanceText=fmt(demoBalance)+' SOL · demo';
+  paintWalletButton(); var ssol2=$('sec-sol'); if(ssol2){ ssol2.textContent='DEMO WALLET (install Phantom for real)'; ssol2.className='warn'; }
+  showToast('✓ Demo wallet connected · '+balanceText);
+  setStatus('Demo wallet connected. Queue a match!'); log('[wallet] demo wallet connected');
+  updateHUD(); showScreen('game');
+}
+// recoverOwedSettle — if a previous real match ended while this wallet
+// was disconnected (or its settle signature was never given), its pot is
+// still locked in the on-chain vault and the settle is still owed.
+// Reopen that match's result popup on the lobby: the Settlement row is
+// the tap-to-retry that signs settle_match and releases the pot.
+function recoverOwedSettle(){
+  if(!chain.pendingSettle || !chain.pendingSettle.summary || chain.settleSig || !chain.joined) return;
+  showScreen('lobby');
+  openMatchResult(chain.pendingSettle.summary);
+  setMmSettle('⏳ This match\'s pot is still locked on-chain — tap here to sign the settlement.');
+  log('[chain] unsettled match recovered on reconnect · settle signature still owed','ruglog');
+}
+// syncConnectedState — paints the connected state from the adapter:
+// truncated address on the button, chain key set, REAL devnet balance.
+async function syncConnectedState(){
+  var k=walletAdapter.publicKey.toString();
+  walletConnected=true; walletDemo=false; walletAddr=k.slice(0,4)+'…'+k.slice(-4); walletFullAddr=k;
+  balanceText='— SOL';
+  if(web3ok()){ chain.playerKey=new solanaWeb3.PublicKey(k); await refreshBalance(); } // REAL devnet balance via the chain connection
+  updateFaucetNote();
+  paintWalletButton(); var ssol=$('sec-sol'); if(ssol){ ssol.textContent='CONNECTED · DEVNET'; ssol.className='ok'; }
+  log('[wallet] Phantom connected · '+k);
+  recoverOwedSettle(); // a previous match's pot may still be locked on-chain, waiting on this wallet's settle signature
+}
+var connectBusy=false;
+async function connectWallet(){
+  if(walletConnected){ openWalletModal(); return; } // already connected — the button is a status display now
+  if(connectBusy) return; // double-taps used to fire overlapping Phantom prompts, which Phantom answers with an error
+  connectBusy=true;
+  var btn=$('cw-connect');
+  try{
+    // The popup stays OPEN for the whole flow: connecting, connected and
+    // every failure are painted into its state panel in place, so the
+    // player always sees what happened and the retry is the same button.
+    openConnectModal();
+    setCwState('busy','Connecting…','Waiting for Phantom — approve the connection in its native prompt, right here in the app.');
+    if(btn){ btn.disabled=true; btn.textContent='Connecting…'; }
+    // Phantom-only: the provider is injected by Phantom's built-in
+    // browser. Detection POLLS briefly (injection can land a beat after
+    // load); if it never appears, this page is open in a regular
+    // browser — the gate is the answer, not a handoff.
+    if(!phantomInstalled()){
+      var found=await waitForPhantom(2600);
+      if(!found){
+        showPhantomGate();
+        setCwState('err','Open SolSwing in Phantom','This game runs only inside the Phantom app\'s built-in browser. Open Phantom, tap the browser icon, and enter solswing.vercel.app.');
+        var note=$('cw-install-note'); if(note) note.classList.remove('hidden');
+        setStatus('Open SolSwing inside the Phantom app browser to connect your wallet.');
+        return;
+      }
+      hidePhantomGate();
+    }
+    await walletAdapter.connect(); // window.phantom.solana.connect() — Phantom's native in-app prompt
+    await syncConnectedState(); // address + REAL devnet balance + chain key
+    onWalletConnected(); // green Connected panel + toast + green wallet button
+    if(chain.balanceLamports!==null && chain.balanceLamports < Math.round(wager()*1e9)+3000000){
+      setStatus('Wallet connected — but it can\'t cover this wager + fees yet. Devnet SOL is free: grab some from faucet.solana.com (GitHub sign-in), then queue.');
+    } else {
+      setStatus('Wallet connected · devnet balance '+balanceText+'. Queue a match to swing!');
+    }
+    updateHUD(); showScreen('game');
+    setTimeout(closeConnectModal, 1600); // hold the green Connected state a beat, then step aside
+  }catch(e){
+    // Phantom rejection (code 4001) is a choice, not a failure — say so,
+    // in the popup, one tap from trying again.
+    openConnectModal();
+    if(e&&e.code===4001){
+      setCwState('err','Connection declined','You declined in Phantom — nothing was connected and no SOL moved. Tap Connect Wallet to try again.');
+      setStatus('Connection declined in Phantom — tap Connect Wallet and approve to play for real.');
+    } else if(e&&e.code==='CONNECT_TIMEOUT'){
+      // The 30s race in the adapter fired: Phantom never answered. The
+      // pending request is cleared, so this same button retries clean.
+      setCwState('err','Connection timed out','Phantom didn\'t answer within 30 seconds — tap Connect Wallet to retry.');
+      setStatus('Connection timed out — tap Connect Wallet to retry.');
+    } else {
+      setCwState('err','Connection didn\'t go through',((e&&e.message)?e.message+' — ':'')+'tap Connect Wallet to retry.');
+      setStatus('Wallet connection didn\'t go through — tap Connect Wallet to try again.');
+    }
+  } finally {
+    connectBusy=false;
+    if(btn){ btn.disabled=false; btn.textContent='Connect Wallet'; } // the button is always the retry
+  }
+}
+// The one top-bar wallet button: first tap connects; once connected, tapping
+// it opens the wallet popup (address + wagered / P&L stats).
+$('wallet-btn').addEventListener('click', function(){ if(walletConnected) openWalletModal(); else connectWallet(); });
+// Lobby Join Game — the lobby's way into a match. Always lands on the game
+// screen: arriving there without a wallet opens the connect popup (wallet
+// connection happens there, not in the lobby); already connected → straight
+// into Queue, which runs the pre-game countdown and the wallet-signature
+// guard before any SOL can move.
+$('lobby-join-btn').addEventListener('click', function(){
+  showScreen('game');
+  if(walletConnected) $('btn-start').click();
+});
+
+// ---------- Wallet popup: the player's own address + session stats ----------
+// Shows ONLY the connected player's wallet — never the treasury/fee wallet.
+function openWalletModal(){
+  $('wm-address').textContent=walletConnected ? (walletFullAddr||walletAddr) : 'Not connected';
+  var wms=$('wm-status'); wms.textContent=walletConnected ? (walletDemo?'● Connected · demo wallet':'● Connected · Phantom · devnet') : 'Not connected'; wms.style.color=walletConnected?'var(--green)':'';
+  $('wm-balance').textContent=walletConnected ? balanceText : '— SOL';
+  var wlt=$('wm-lasttx'); if(wlt){ wlt.innerHTML=chain.lastTx ? ('<a href="'+explorerTx(chain.lastTx)+'" target="_blank" rel="noopener">'+shortSig(chain.lastTx)+' ↗</a>') : '—'; }
+  if(realMode()){ refreshBalance().then(function(){ $('wm-balance').textContent=balanceText; updateFaucetNote(); }); } // live balance every time the popup opens
+  $('wm-wagered').textContent=fmt(statsWagered)+' SOL';
+  var pnl=statsPayouts-statsWagered, pnlEl=$('wm-pnl');
+  pnlEl.textContent=(pnl>0?'+':pnl<0?'-':'')+fmt(Math.abs(pnl))+' SOL';
+  pnlEl.style.color=pnl>0?'var(--green)':(pnl<0?'var(--red)':'');
+  $('wm-played').textContent=statsPlayed;
+  $('wm-won').textContent=statsWon;
+  $('wm-winrate').textContent=statsPlayed? Math.round(statsWon/statsPlayed*100)+'%':'—';
+  $('wallet-modal').classList.add('open');
+  $('wallet-modal-close').focus();
+}
+function closeWalletModal(){ $('wallet-modal').classList.remove('open'); }
+$('wallet-modal-close').addEventListener('click', closeWalletModal);
+$('wallet-modal').addEventListener('click', function(e){ if(e.target===this) closeWalletModal(); });
+
+// ---------- Connect popup (game screen): one Connect Wallet button ----------
+// Wallet connection happens HERE — the lobby has no wallet tile. Opened by
+// showScreen('game') when no wallet is connected, and by Queue Match.
+// ONE primary button drives every platform (see connectWallet): the
+// popup never hides it and never swaps it for link buttons — state,
+// errors and retries all live in the popup's state panel.
+var toastTimer=null;
+function showToast(msg){
+  var t=$('toast'); if(!t) return;
+  t.textContent=msg; t.classList.add('show');
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){ t.classList.remove('show'); }, 3400);
+}
+// paintWalletButton — the floating wallet button IS the connection
+// indicator: "Connect Wallet" when out, green with a live dot and the
+// truncated address (7xK…9fWz) when in.
+function paintWalletButton(){
+  var wb=$('wallet-btn'); if(!wb) return;
+  wb.textContent=walletConnected ? walletAddr : 'Connect Wallet';
+  wb.classList.toggle('connected', walletConnected);
+}
+// setCwState — the connect popup's live state panel. kind: 'busy' |
+// 'ok' | 'err' (or null to hide). Errors keep the Connect Wallet button
+// enabled right below them: it IS the retry. cwStateKind remembers what
+// is painted so a stale panel can be recognised (see renderConnectState).
+var cwStateKind=null;
+function setCwState(kind, title, sub){
+  var box=$('cw-state'); if(!box) return;
+  cwStateKind=kind||null;
+  if(!kind){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden','ok','err','busy'); box.classList.add(kind);
+  $('cw-state-ico').textContent=(kind==='ok')?'✅':(kind==='err')?'⚠️':'⏳';
+  $('cw-state-title').textContent=title;
+  $('cw-state-sub').textContent=sub||'';
+}
+// onWalletConnected — the unmistakable success signal after a real
+// Phantom connect (the native in-app prompt):
+// green Connected panel in the popup (address + real devnet balance),
+// a success toast over the screen, and the green wallet button.
+function onWalletConnected(){
+  paintWalletButton();
+  setCwState('ok','Connected ✓','Phantom · '+walletAddr+' · '+balanceText);
+  showToast('✓ Wallet connected · '+walletAddr+' · '+balanceText);
+}
+// renderConnectState — only the contextual bits: if the wallet is
+// already connected the panel says so; the install note appears when
+// Phantom isn't detected (the Connect button itself stays put either
+// way — tapping it re-checks, or errors with guidance).
+function renderConnectState(){
+  if(walletConnected){ setCwState('ok','Connected ✓',(walletDemo?'Demo wallet':'Phantom')+' · '+walletAddr+' · '+balanceText); }
+  else if(cwStateKind==='ok'){ setCwState(null); } // ghost guard: a Connected panel from an earlier session must never greet a disconnected player — 'busy' and 'err' panels are live state and are never cleared here
+  var inst=$('cw-install-note'); if(inst) inst.classList.toggle('hidden', phantomInstalled());
+  return phantomInstalled();
+}
+function openConnectModal(){
+  var ov=$('connect-modal'); if(!ov) return;
+  var wasOpen=ov.classList.contains('open');
+  renderConnectState();
+  ov.classList.add('open');
+  var b=$('cw-connect');
+  if(b){ if(!connectBusy){ b.disabled=false; b.textContent='Connect Wallet'; } b.focus(); } // no flow in flight → the button is armed and labelled, never a leftover "Connecting…"
+  if(!wasOpen){ // the extension can inject a beat after the page loads — re-check detection while the popup sits open
+    var tries=0;
+    var iv=setInterval(function(){ renderConnectState(); if(phantomInstalled()||++tries>12||!ov.classList.contains('open')) clearInterval(iv); }, 400);
+  }
+}
+function closeConnectModal(){ var ov=$('connect-modal'); if(ov) ov.classList.remove('open'); }
+$('connect-modal-close').addEventListener('click', closeConnectModal);
+$('connect-modal').addEventListener('click', function(e){ if(e.target===this) closeConnectModal(); });
+$('cw-connect').addEventListener('click', connectWallet); // the popup stays open — connectWallet paints busy / connected / error in place
+
+document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ if(mmActive){ mmDisconnect(); return; } closeWalletModal(); closeMatchResult(); closeRefundResult(); closeConnectModal(); if(signPending) settleSignature(false); } });
+
+// ---------- Page 4 · Chat room (simulated players — production chat rides the game-server WebSocket) ----------
+var chatPlayers=[
+  {name:'DiamondDoge', color:'#fcd34d'},
+  {name:'WifHatWendy', color:'#f9a8d4'},
+  {name:'ChadwickTrades', color:'#93c5fd'},
+  {name:'JeetSlayer99', color:'#c4b5fd'},
+  {name:'PaperHandsPete', color:'#9ca3af'},
+  {name:'Swing Bot', color:'#86efac'}
+];
+function chatClock(){ return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:false}); }
+function addChat(name, text, mine){
+  var box=$('chat-box'); if(!box) return;
+  var wrap=document.createElement('div'); wrap.className='msg'+(mine?' mine':'');
+  var head=document.createElement('div'); head.className='mhead';
+  var nm=document.createElement('span'); nm.className='mname'; nm.textContent=name;
+  nm.style.color = mine ? '#86efac' : ((chatPlayers.filter(function(p){return p.name===name})[0]||{}).color || '#f3f4f6');
+  var tm=document.createElement('span'); tm.className='mtime'; tm.textContent=chatClock();
+  head.appendChild(nm); head.appendChild(tm);
+  var tx=document.createElement('div'); tx.className='mtext'; tx.textContent=text;
+  wrap.appendChild(head); wrap.appendChild(tx); box.appendChild(wrap); box.scrollTop=box.scrollHeight;
+}
+function addChatSys(text){
+  var box=$('chat-box'); if(!box) return;
+  var d=document.createElement('div'); d.className='msg sys'; d.textContent=text;
+  box.appendChild(d); box.scrollTop=box.scrollHeight;
+}
+addChatSys('You joined #arena · demo room with simulated players');
+addChat('DiamondDoge','just sold at 190ms on that last rug. easiest 0.188 of my life');
+addChat('WifHatWendy','the pump ALWAYS looks real at 6 seconds. stay frosty out there');
+addChat('ChadwickTrades','anyone else on Degen difficulty today? the bot is cracked');
+addChat('JeetSlayer99','i blinked. BLINKED. lost the whole pot');
+addChat('Swing Bot','beep boop. queue up, humans — the next match needs a victim');
+addChat('PaperHandsPete','sold early AND still lost. skill issue. mine.');
+var chatReplies=[
+  'gg — run it back?',
+  'lmao classic arena behaviour',
+  'spacebar gang rise up',
+  'fr, the 5 second window is a lie. it is ALL reflex',
+  'queue a 0.25 match and say it with your chest',
+  'the bot sold at 250ms on me earlier. absolute robbery',
+  'diamond hands until the red flash, that is the whole game'
+];
+var chatAmbient=[
+  'new personal best: 204ms. CHAD status incoming',
+  'who else watches for the red flash instead of the chart?',
+  'devnet SOL is free and i STILL hate losing it',
+  'tip: hover the sell button, never rest your thumb on it',
+  'that last pump went the full 9 seconds, my heart was in my ears',
+  'jeet behaviour in the chat again, mods asleep'
+];
+$('chat-form').addEventListener('submit', function(e){
+  e.preventDefault();
+  var inp=$('chat-input'); var v=inp.value.trim(); if(!v) return;
+  inp.value=''; addChat('You', v, true);
+  setTimeout(function(){
+    var p=chatPlayers[Math.floor(Math.random()*chatPlayers.length)];
+    addChat(p.name, chatReplies[Math.floor(Math.random()*chatReplies.length)]);
+  }, 1600+Math.random()*2600);
+});
+setInterval(function(){
+  if(!$('screen-chat') || !$('screen-chat').classList.contains('active')) return;
+  if(Math.random()<0.5) return;
+  var p=chatPlayers[Math.floor(Math.random()*chatPlayers.length)];
+  addChat(p.name, chatAmbient[Math.floor(Math.random()*chatAmbient.length)]);
+}, 15000);
+
+dots();
+// Phantom-only gate on load: provider already injected → game shows.
+// Not injected yet → gate shows while detection polls; if Phantom's
+// provider lands within the window the gate lifts on its own.
+refreshPhantomGate();
+if(!phantomInstalled()){ waitForPhantom(3000).then(function(found){ if(found) hidePhantomGate(); else showPhantomGate(); }); }
+log('[server] SolSwing authority simulation ready · best-of-3 · rug 4–9s · sell window 5000ms');
+log('[chain] program=solswing (Anchor) · settle=94/6 · network=devnet');
+log(treasuryLockOk()?'[chain] treasury lock verified · 6% fee receiver = the one locked treasury wallet':'[chain] ⛔ TREASURY LOCK CHECK FAILED', treasuryLockOk()?'winlog':'ruglog');
+</script>
+</body>
+</html>
