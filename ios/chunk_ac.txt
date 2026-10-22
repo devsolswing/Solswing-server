@@ -1,4 +1,21 @@
- due —
+      keys:[
+        { pubkey:chain.matchState, isSigner:false, isWritable:true },
+        { pubkey:chain.vault, isSigner:false, isWritable:true },
+        { pubkey:chain.playerKey, isSigner:true, isWritable:true },
+        { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+      ],
+      data:ixData(DISC.cancel_match, [u64le(chain.matchId)])
+    });
+    var sig=await phantomSend([ix]);
+    chain.cancelSig=sig; chain.lastTx=sig;
+    log('[chain] cancel_match confirmed · escrow refunded to your wallet · tx '+shortSig(sig),'winlog');
+    refreshBalance().then(updateFaucetNote);
+    return sig;
+  } finally { chain.cancelBusy=false; }
+}
+function buildSettleIx(winnerId, ctx){
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  // ctx (optional) is the account snapshot taken when the settle fell due —
   // it wins over the live chain fields, so a settle retried after a NEW
   // match has started still settles the match it actually belongs to.
   var ms=(ctx&&ctx.matchState)?new solanaWeb3.PublicKey(ctx.matchState):chain.matchState;
@@ -753,11 +770,4 @@ function forfeit(reason){
 // completes (player still connected) does the stake signature open —
 // no signature → no match, no SOL moved.
 $('btn-start').addEventListener('click', function(){
-  if(active||signPending||pregameActive||waiting||mmActive) return;
-  if(!walletConnected){ openConnectModal(); return; } // no wallet → the connect popup, right here on the game screen
-  if(walletDemo && wins===0 && losses===0 && demoBalance < wager()-1e-9){ setStatus('Demo wallet is short for a '+fmt(wager())+' SOL wager — disconnect the demo wallet and reconnect it to top back up to 10 SOL.'); return; } // a stake the balance can't cover is never signed (the real wallet path enforces the same rule on-chain via the 'insufficient' check)
-  if(wins>0||losses>0){ startRound(); return; } // safety only — mid-match rounds auto-start via the countdown
-  if(matchMode==='pvp'){ startMatchmaking(); return; } // PvP: sign → wait for opponent → both bets locked → matchmaking countdown → round 1
-  startPregameCountdown();
-});
-$('btn-sell').addEventL
+  if(active||signPending||pregam
