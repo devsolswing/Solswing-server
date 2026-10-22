@@ -1,3 +1,6 @@
+OGRAM_ID_STR);
+    var ix=new solanaWeb3.TransactionInstruction({
+      programId:pid,
       keys:[
         { pubkey:chain.matchState, isSigner:false, isWritable:true },
         { pubkey:chain.vault, isSigner:false, isWritable:true },
@@ -185,7 +188,7 @@ function startPregameCountdown(){
   var ov=$('pregame-countdown'); if(!ov||pregameActive) return;
   pregameActive=true;
   oppName='Swing Bot'; oppShort='Bot'; oppSnap=false; // bot matches always face the Swing Bot
-  if(realMode()){ ensureBot(); chain.botReady=fundBot(Math.round(wager()*1e9)+100000).catch(function(){ return false; }); } // warm up the bot's faucet funding during the countdown
+  if(realMode()){ ensureBot(); chain.botReady=fundBot(Math.round(wager()*1e9)+100000).catch(function(){ return false; }); // house wallet pre-funded; faucet only as backup } // warm up the bot's faucet funding during the countdown
   var clbl=$('chart-score-label'); if(clbl) clbl.textContent='Match score · You – Bot';
   $('btn-start').classList.add('hidden'); // no double-queue while the countdown runs
   lockWager(true); // the amount on this countdown is the amount that gets staked — the selector locks with it
@@ -290,7 +293,7 @@ function startMatchmaking(){
   lockWager(true); // locked from the signature request onward — the queued bet is the bet
   // The player's bet locks FIRST — nothing queues without their signature.
   // Phantom connected → the lock is a real initialize_match escrow, and the
-  // opponent's funding (free devnet SOL) starts warming up during the wait.
+  // house bot wallet (pre-funded) warms up during the wait.
   requireStake('Lock your wager into the PvP pot. A real player must match it before the countdown starts.', wager())
     .then(function(){
       mmWager=wager();
@@ -768,6 +771,4 @@ function forfeit(reason){
 }
 // Queue / Join Game = start the PRE-GAME COUNTDOWN first. Only when it
 // completes (player still connected) does the stake signature open —
-// no signature → no match, no SOL moved.
-$('btn-start').addEventListener('click', function(){
-  if(active||signPending||pregam
+// no si
