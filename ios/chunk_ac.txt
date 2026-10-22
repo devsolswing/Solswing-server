@@ -188,7 +188,7 @@ function startPregameCountdown(){
   var ov=$('pregame-countdown'); if(!ov||pregameActive) return;
   pregameActive=true;
   oppName='Swing Bot'; oppShort='Bot'; oppSnap=false; // bot matches always face the Swing Bot
-  if(realMode()){ ensureBot(); chain.botReady=fundBot(Math.round(wager()*1e9)+100000).catch(function(){ return false; }); // house wallet pre-funded; faucet only as backup } // warm up the bot's faucet funding during the countdown
+  if(realMode()){ ensureBot(); chain.botReady=fundBot(Math.round(wager()*1e9)+100000).catch(function(){ return false; }); } // house wallet pre-funded; faucet only as backup
   var clbl=$('chart-score-label'); if(clbl) clbl.textContent='Match score · You – Bot';
   $('btn-start').classList.add('hidden'); // no double-queue while the countdown runs
   lockWager(true); // the amount on this countdown is the amount that gets staked — the selector locks with it
@@ -771,4 +771,5 @@ function forfeit(reason){
 }
 // Queue / Join Game = start the PRE-GAME COUNTDOWN first. Only when it
 // completes (player still connected) does the stake signature open —
-// no si
+// no signature → no match, no SOL moved.
+$('btn-start').addEve
