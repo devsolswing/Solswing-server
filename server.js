@@ -44,6 +44,7 @@ const WAGER_SOL = parseFloat(process.env.DEFAULT_WAGER_SOL || '0.1');
 const RUG_MIN_MS = 4000;
 const RUG_MAX_MS = 9000;
 const SELL_WINDOW_MS = 5000;   // sells after this are ignored
+const STAKE_TIMEOUT_MS = 90000; // both stakes must land within 90s of match_found
 const TICK_MS = 150;
 const MAX_WAGER_SOL = 100;
 const MIN_WAGER_SOL = 0.01;
@@ -108,7 +109,7 @@ if (PROGRAM_ID && (adjudicatorKeypairEnv || adjudicatorKeypairPath)) {
 // ---------------------------------------------------------------------------
 // Match state
 // ---------------------------------------------------------------------------
-let nextMatchId = 1;
+let nextMatchId = Date.now(); // millisecond base: on-chain match PDAs must never repeat across server restarts
 const queue = [];              // waiting players
 const matches = new Map();     // matchId -> match
 const socketMatch = new Map(); // ws -> matchId
@@ -123,12 +124,19 @@ function createMatch(p1, p2) {
         pot: wager * 2,
         wins: [0, 0],
         round: null,
-        state: 'starting',
+        state: 'awaiting_stakes',
+        staked: [false, false],
+        stakeTimer: null,
     };
     matches.set(matchId, match);
     if (p1.ws) socketMatch.set(p1.ws, matchId);
     if (p2.ws) socketMatch.set(p2.ws, matchId);
 
+    // Roles: the waiting (first-queued) player CREATES the on-chain match,
+    // the new player JOINS it. Both must use this exact server matchId for
+    // their on-chain txs, and the creator must name the server adjudicator —
+    // otherwise the server cannot settle the pot at match end.
+    const adjudicator = (solana && solana.adjudicator) ? solana.adjudicator.publicKey.toBase58() : null;
     for (let i = 0; i < 2; i++) {
         const me = match.players[i];
         if (!me.ws) continue; // bots have no socket
@@ -137,11 +145,68 @@ function createMatch(p1, p2) {
             type: 'match_found',
             opponent: opp.name,
             pot: fmt(match.pot),
+            wager: match.wager,
             matchId,
+            role: i === 0 ? 'creator' : 'joiner',
+            adjudicator,
         }));
     }
     console.log(`[match ${matchId}] ${p1.name} vs ${p2.name} — pot ${fmt(match.pot)} SOL`);
-    setTimeout(() => startRound(match), 1500);
+    // No rounds until BOTH stakes are verified on-chain. A match that never
+    // funds is cancelled, never played for free.
+    match.stakeTimer = setTimeout(() => {
+        if (match.state === 'awaiting_stakes') cancelMatch(match, 'stake_timeout');
+    }, STAKE_TIMEOUT_MS);
+}
+
+// Cancel a match that never started (stakes pending, or a player left before
+// round 1). No settlement, no payout claim — a player who already staked as
+// creator refunds via cancel_match on their side.
+function cancelMatch(match, reason) {
+    if (!match || match.state === 'ended') return;
+    match.state = 'ended';
+    if (match.stakeTimer) { clearTimeout(match.stakeTimer); match.stakeTimer = null; }
+    if (match.round) {
+        clearTimeout(match.round.rugTimer);
+        clearInterval(match.round.tickTimer);
+        clearTimeout(match.round.resolveTimer);
+        clearTimeout(match.round.botTimer);
+        match.round = null;
+    }
+    match.players.forEach(p => {
+        if (p.ws) {
+            socketMatch.delete(p.ws);
+            if (p.ws.readyState === WebSocket.OPEN) {
+                p.ws.send(JSON.stringify({ type: 'match_cancelled', reason }));
+            }
+        }
+    });
+    matches.delete(match.id);
+    console.log(`[match ${match.id}] cancelled: ${reason}`);
+}
+
+// Verify a claimed stake on-chain: the match account must exist and the
+// vault must hold at least the stakes confirmed so far plus this one.
+// Without wagering configured (no adjudicator key), there is nothing to
+// verify and rounds play without on-chain stakes.
+async function verifyStake(match, idx) {
+    if (!solana || !solana.program) return true;
+    try {
+        const { connection, PublicKey, anchor } = solana;
+        const matchIdBuf = Buffer.from(new anchor.BN(match.id).toArray('le', 8));
+        const programId = new PublicKey(PROGRAM_ID);
+        const [matchState] = PublicKey.findProgramAddressSync([Buffer.from('match-state'), matchIdBuf], programId);
+        const [vault] = PublicKey.findProgramAddressSync([Buffer.from('vault'), matchIdBuf], programId);
+        const stateInfo = await connection.getAccountInfo(matchState);
+        if (!stateInfo) return false;
+        const vaultBalance = await connection.getBalance(vault);
+        const stakedCount = match.staked.filter(Boolean).length;
+        const required = Math.round((stakedCount + 1) * match.wager * 1e9);
+        return vaultBalance >= required;
+    } catch (e) {
+        console.error(`[match ${match.id}] stake verification error:`, e.message);
+        return false;
+    }
 }
 
 function startRound(match) {
@@ -255,9 +320,10 @@ async function endMatch(match, winnerIndex) {
 
     console.log(`[match ${match.id}] winner: ${winner.name} — payout ${fmt(payout)} SOL`);
 
+    let settleTx = null;
     if (solana && solana.program && !winner.isBot && winner.wallet) {
         try {
-            await settleOnChain(match, winnerIndex);
+            settleTx = await settleOnChain(match, winnerIndex);
         } catch (e) {
             console.error(`[match ${match.id}] on-chain settlement failed:`, e.message);
         }
@@ -271,6 +337,7 @@ async function endMatch(match, winnerIndex) {
                 type: 'match_end',
                 outcome: i === winnerIndex ? 'win' : 'loss',
                 payout: i === winnerIndex ? payout : 0,
+                settleTx,
             }));
         }
     });
@@ -296,6 +363,7 @@ async function settleOnChain(match, winnerIndex) {
         })
         .rpc();
     console.log(`[match ${match.id}] settled on-chain: ${tx}`);
+    return tx;
 }
 
 function broadcast(match, msg) {
@@ -349,7 +417,7 @@ wss.on('connection', (ws) => {
     ws.lastQueueAt = 0;
     broadcastPresence();
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
         // ---- Rate limiting (rolling 1s window) ----
         const now = Date.now();
         ws.msgTimestamps = ws.msgTimestamps.filter(t => now - t < 1000);
@@ -369,6 +437,7 @@ wss.on('connection', (ws) => {
 
         if (msg.type === 'queue') {
             if (socketMatch.has(ws)) return; // already in a match
+            if (queue.some(p => p.ws === ws)) return; // already waiting
             if (now - ws.lastQueueAt < 2000) return; // no queue spam
             ws.lastQueueAt = now;
 
@@ -385,13 +454,16 @@ wss.on('connection', (ws) => {
                 isBot: false,
             };
 
-            const waiting = queue.shift();
-            if (waiting && waiting.ws.readyState === WebSocket.OPEN) {
+            // Human-vs-human only, equal wagers only: a player must never be
+            // matched into a pot bigger than the wager they queued with.
+            const qi = queue.findIndex(p => p.ws.readyState === WebSocket.OPEN && Math.abs(p.wager - wager) < 1e-9);
+            if (qi !== -1) {
+                const waiting = queue.splice(qi, 1)[0];
                 createMatch(waiting, player);
             } else {
                 queue.push(player);
-                // Human-vs-human only: no bot fallback. The player waits
-                // here until another human queues.
+                // No bot fallback. The player waits here until another human
+                // queues at the same wager.
                 ws.send(JSON.stringify({ type: 'searching' }));
             }
         }
@@ -409,7 +481,40 @@ wss.on('connection', (ws) => {
             const match = matches.get(socketMatch.get(ws));
             if (!match) return;
             const idx = match.players.findIndex(p => p.ws === ws);
+            if (idx === -1) return;
+            if (match.state === 'awaiting_stakes') { cancelMatch(match, 'forfeit_during_stakes'); return; }
             forfeit(match, idx, typeof msg.reason === 'string' ? msg.reason.slice(0, 64) : 'client_forfeit');
+        }
+
+        if (msg.type === 'staked') {
+            const match = matches.get(socketMatch.get(ws));
+            if (!match || match.state !== 'awaiting_stakes') return;
+            const idx = match.players.findIndex(p => p.ws === ws);
+            if (idx === -1) return;
+            if (idx === 1 && !match.staked[0]) return; // joiner stakes only after the creator
+            if (match.staked[idx]) return;
+            const ok = await verifyStake(match, idx);
+            if (!ok) { sendError(ws, 'Stake not verified on-chain yet — retry.'); return; }
+            match.staked[idx] = true;
+            console.log(`[match ${match.id}] player ${idx + 1} staked`);
+            if (idx === 0) {
+                const joiner = match.players[1];
+                if (joiner.ws && joiner.ws.readyState === WebSocket.OPEN) {
+                    joiner.ws.send(JSON.stringify({ type: 'creator_staked' }));
+                }
+            }
+            if (match.staked[0] && match.staked[1]) {
+                if (match.stakeTimer) { clearTimeout(match.stakeTimer); match.stakeTimer = null; }
+                match.state = 'starting';
+                setTimeout(() => startRound(match), 1500);
+            }
+        }
+
+        if (msg.type === 'stake_failed') {
+            const match = matches.get(socketMatch.get(ws));
+            if (match && match.state === 'awaiting_stakes') {
+                cancelMatch(match, 'stake_failed');
+            }
         }
 
         if (msg.type === 'chat') {
@@ -431,7 +536,9 @@ wss.on('connection', (ws) => {
         if (match && match.state !== 'ended') {
             const idx = match.players.findIndex(p => p.ws === ws);
             if (idx !== -1) {
-                if (match.state === 'live') {
+                if (match.state === 'awaiting_stakes') {
+                    cancelMatch(match, 'disconnect_during_stakes');
+                } else if (match.state === 'live') {
                     forfeit(match, idx, 'disconnect');
                 } else {
                     socketMatch.delete(ws);
