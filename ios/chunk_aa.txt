@@ -454,6 +454,18 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
   }).catch(function(){});
 })();
 </script>
+<script>
+// Site background: 90s-PC doge image, base64 parts in ios/ (same host as the game chunks)
+(function(){
+  var base='https://raw.githubusercontent.com/devsolswing/Solswing-server/main/ios/';
+  var parts=['doge-bg-b64-1.txt','doge-bg-b64-2.txt','doge-bg-b64-3.txt','doge-bg-b64-4.txt','doge-bg-b64-5.txt','doge-bg-b64-6.txt','doge-bg-b64-7.txt'];
+  Promise.all(parts.map(function(p){return fetch(base+p).then(function(r){return r.text();});})).then(function(c){
+    var st=document.createElement('style');
+    st.textContent='body::before{background-image:url("data:image/jpeg;base64,'+c.join('').replace(/\s/g,'')+'")!important}';
+    document.head.appendChild(st);
+  }).catch(function(){});
+})();
+</script>
   <section class="screen" id="screen-lobby">
     <div class="lobby-bg" aria-hidden="true"><div class="wash"></div><div class="layer far"></div><div class="layer near"></div></div>
     <div class="screen-head">
@@ -600,5 +612,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
     </div>
 
     <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
-    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not real-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
-    <details class="faq"><summary>How do I actually win?</summary><p>Pure reflexes. When the
+    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not r

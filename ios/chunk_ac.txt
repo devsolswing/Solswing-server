@@ -1,4 +1,18 @@
-ig=sig; chain.lastTx=sig;
+wait fundBot(lamports+100000); }catch(e){ ok=false; }
+  if(!ok) throw new Error('opponent stake could not be funded (devnet faucet unreachable / rate-limited)');
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  var ix=new solanaWeb3.TransactionInstruction({
+    programId:pid,
+    keys:[
+      { pubkey:chain.matchState, isSigner:false, isWritable:true },
+      { pubkey:chain.vault, isSigner:false, isWritable:true },
+      { pubkey:chain.botKey.publicKey, isSigner:true, isWritable:true },
+      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+    ],
+    data:ixData(DISC.join_match, [u64le(chain.matchId)])
+  });
+  var sig=await botSend([ix]);
+  chain.joined=true; chain.joinSig=sig; chain.lastTx=sig;
   log('[chain] join_match confirmed · opponent stake locked · pot '+fmt(wagerSol*2)+' SOL · tx '+shortSig(sig),'winlog');
   return sig;
 }
@@ -766,9 +780,4 @@ function finishRound(who){
   if(who==='you'&&youMs==null) youMs=Date.now()-rugStamp;
   if(botMs==null) botMs=9999;
   telCommit(who);
-  $('btn-sell').classList.add('hidden'); $('btn-start').classList.remove('hidden'); $('btn-start').textContent='Queue Next Round';
-  if(who==='you'){ wins++; setStatus('🟢 Frontrun! You sold in '+youMs+'ms vs '+oppShort+' '+botMs+'ms.'); log('[server] round_result winner=player · '+youMs+'ms vs '+botMs+'ms','winlog'); }
-  else { losses++; if(youMs!=null){ setStatus('🔴 '+oppShort+' beat you — '+botMs+'ms vs your '+youMs+'ms.'); } else { setStatus('🔴 RUGGED! '+oppShort+' sold in '+botMs+'ms — you never exited.'); } log('[server] round_result winner=opponent · '+botMs+'ms','ruglog'); }
-  dots(); roundNo++;
-  if(wins>=2||losses>=2){ endMatch(wins>=2); } // decided → disconnect NOW: lobby + stats popup (see endMatch)
-  else { showRoundCountdown(); } // match not decided 
+  $('btn-sell').classList.add('hidden'); $('btn-start').classList.remove('hidd
