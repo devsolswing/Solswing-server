@@ -1,4 +1,13 @@
-wait fundBot(lamports+100000); }catch(e){ ok=false; }
+e vault · tx '+shortSig(sig),'winlog');
+  refreshBalance().then(updateFaucetNote);
+  return sig;
+}
+// join_match — the house opponent stakes the same wager, for real.
+async function chainBotJoin(wagerSol){
+  if(chain.joined) return chain.joinSig;
+  var lamports=Math.round(wagerSol*1e9);
+  var ok=false;
+  try{ ok=await fundBot(lamports+100000); }catch(e){ ok=false; }
   if(!ok) throw new Error('opponent stake could not be funded (devnet faucet unreachable / rate-limited)');
   var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
   var ix=new solanaWeb3.TransactionInstruction({
@@ -775,9 +784,4 @@ $('btn-join-game').addEventListener('click', function(){
 });
 $('btn-disconnect').addEventListener('click', disconnectWallet);
 function finishRound(who){
-  if(!active) return; active=false; clearTimers();
-  $('rug').classList.remove('active'); // round decided — clear the rug flash, result lives in the status line
-  if(who==='you'&&youMs==null) youMs=Date.now()-rugStamp;
-  if(botMs==null) botMs=9999;
-  telCommit(who);
-  $('btn-sell').classList.add('hidden'); $('btn-start').classList.remove('hidd
+  if(!active) return; active=f

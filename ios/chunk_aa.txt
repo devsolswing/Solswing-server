@@ -344,6 +344,11 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
 @media(max-width:560px){.menu-tiles{grid-template-columns:1fr}}
 .menu-tile{display:flex;align-items:center;gap:14px;text-align:left;background:var(--card);border:1px solid var(--line2);border-radius:16px;padding:16px;cursor:pointer;font-family:inherit;color:var(--text);width:100%}
 .menu-tile:hover{border-color:var(--green)}
+/* lobby tiles green like the Join Game button */
+#screen-lobby .menu-tile{background:var(--green);border-color:transparent;color:#041207}
+#screen-lobby .menu-tile:hover{border-color:transparent;filter:brightness(1.07)}
+#screen-lobby .menu-tile .td{color:rgba(4,18,7,.72)}
+#screen-lobby .menu-tile .tgo{color:#041207}
 .menu-tile .tic{font-size:26px;line-height:1;flex:none}
 .menu-tile .tt{font-weight:700;font-size:16.5px;display:block}
 .menu-tile .td{color:var(--muted);font-size:13px;line-height:1.45;display:block;margin-top:2px}
@@ -608,8 +613,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <div class="sec-row"><span>Who decides the winner</span><b>THE GAME SERVER · TIMESTAMPS ON ARRIVAL</b></div>
       <div class="sec-row"><span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
       <div class="sec-row"><span>Funds during a match</span><b>LOCKED IN THE ON-CHAIN VAULT UNTIL SETTLEMENT</b></div>
-      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never through a link someone drops in chat.</p>
-    </div>
-
-    <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
-    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not r
+      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with 

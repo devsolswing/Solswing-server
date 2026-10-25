@@ -1,4 +1,9 @@
-en'); $('btn-start').textContent='Queue Next Round';
+alse; clearTimers();
+  $('rug').classList.remove('active'); // round decided — clear the rug flash, result lives in the status line
+  if(who==='you'&&youMs==null) youMs=Date.now()-rugStamp;
+  if(botMs==null) botMs=9999;
+  telCommit(who);
+  $('btn-sell').classList.add('hidden'); $('btn-start').classList.remove('hidden'); $('btn-start').textContent='Queue Next Round';
   if(who==='you'){ wins++; setStatus('🟢 Frontrun! You sold in '+youMs+'ms vs '+oppShort+' '+botMs+'ms.'); log('[server] round_result winner=player · '+youMs+'ms vs '+botMs+'ms','winlog'); }
   else { losses++; if(youMs!=null){ setStatus('🔴 '+oppShort+' beat you — '+botMs+'ms vs your '+youMs+'ms.'); } else { setStatus('🔴 RUGGED! '+oppShort+' sold in '+botMs+'ms — you never exited.'); } log('[server] round_result winner=opponent · '+botMs+'ms','ruglog'); }
   dots(); roundNo++;
