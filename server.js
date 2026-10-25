@@ -70,12 +70,20 @@ function shortAddr(addr) {
 // Optional Solana wiring (only loaded when env is configured)
 // ---------------------------------------------------------------------------
 let solana = null;
-if (PROGRAM_ID && process.env.ADJUDICATOR_KEYPAIR_PATH) {
+const adjudicatorKeypairEnv = process.env.ADJUDICATOR_KEYPAIR;
+const adjudicatorKeypairPath = process.env.ADJUDICATOR_KEYPAIR_PATH;
+if (PROGRAM_ID && (adjudicatorKeypairEnv || adjudicatorKeypairPath)) {
     try {
         const { Connection, Keypair, PublicKey } = require('@solana/web3.js');
         const anchor = require('@coral-xyz/anchor');
-        const kpPath = process.env.ADJUDICATOR_KEYPAIR_PATH.replace('~', os.homedir());
-        const secret = Uint8Array.from(JSON.parse(fs.readFileSync(kpPath, 'utf8')));
+        let secret;
+        if (adjudicatorKeypairEnv) {
+            // Railway-style: secret key JSON array in an env variable.
+            secret = Uint8Array.from(JSON.parse(adjudicatorKeypairEnv));
+        } else {
+            const kpPath = adjudicatorKeypairPath.replace('~', os.homedir());
+            secret = Uint8Array.from(JSON.parse(fs.readFileSync(kpPath, 'utf8')));
+        }
         const adjudicator = Keypair.fromSecretKey(secret);
         const connection = new Connection(SOLANA_RPC, 'confirmed');
         const wallet = new anchor.Wallet(adjudicator);
@@ -94,7 +102,7 @@ if (PROGRAM_ID && process.env.ADJUDICATOR_KEYPAIR_PATH) {
         console.warn('[solana] disabled —', e.message);
     }
 } else {
-    console.warn('[solana] disabled — set PROGRAM_ID and ADJUDICATOR_KEYPAIR_PATH to enable on-chain settlement.');
+    console.warn('[solana] disabled — set PROGRAM_ID and ADJUDICATOR_KEYPAIR (or ADJUDICATOR_KEYPAIR_PATH) to enable on-chain settlement.');
 }
 
 // ---------------------------------------------------------------------------

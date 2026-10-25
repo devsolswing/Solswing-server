@@ -1,0 +1,368 @@
+{
+  "version": "0.1.0",
+  "name": "solswing",
+  "instructions": [
+    {
+      "name": "initializeMatch",
+      "docs": [
+        "Player One creates a match and escrows their wager.",
+        "Two-phase flow: Player Two joins later via `join_match`, so the two",
+        "players never need to co-sign a single transaction."
+      ],
+      "accounts": [
+        {
+          "name": "matchState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "vault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "playerOne",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "adjudicator",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "non-default in the handler. Only its key is stored."
+          ]
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "matchId",
+          "type": "u64"
+        },
+        {
+          "name": "wagerAmount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "joinMatch",
+      "docs": [
+        "Player Two joins an open match and escrows the same wager."
+      ],
+      "accounts": [
+        {
+          "name": "matchState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "vault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "playerTwo",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "matchId",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "cancelMatch",
+      "docs": [
+        "Player One reclaims their wager if nobody joined yet.",
+        "Prevents funds locking forever in abandoned matches."
+      ],
+      "accounts": [
+        {
+          "name": "matchState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "vault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "playerOne",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "matchId",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "settleMatch",
+      "docs": [
+        "Settles the match. Callable ONLY by the adjudicator (the game server).",
+        "Pays 94% of the pot to the winner, 6% to the platform treasury."
+      ],
+      "accounts": [
+        {
+          "name": "matchState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "vault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "winner",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "platformFeeReceiver",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "adjudicator",
+          "isMut": false,
+          "isSigner": true
+        }
+      ],
+      "args": [
+        {
+          "name": "winnerId",
+          "type": "u8"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "MatchState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "matchId",
+            "type": "u64"
+          },
+          {
+            "name": "playerOne",
+            "type": "publicKey"
+          },
+          {
+            "name": "playerTwo",
+            "type": "publicKey"
+          },
+          {
+            "name": "adjudicator",
+            "type": "publicKey"
+          },
+          {
+            "name": "wagerAmount",
+            "type": "u64"
+          },
+          {
+            "name": "isSettled",
+            "type": "bool"
+          },
+          {
+            "name": "isCancelled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "vaultBump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "MatchCancelled",
+      "fields": [
+        {
+          "name": "matchId",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "playerOne",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "refund",
+          "type": "u64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "MatchCreated",
+      "fields": [
+        {
+          "name": "matchId",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "playerOne",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "wagerAmount",
+          "type": "u64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "MatchJoined",
+      "fields": [
+        {
+          "name": "matchId",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "playerTwo",
+          "type": "publicKey",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "MatchSettled",
+      "fields": [
+        {
+          "name": "matchId",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "winner",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "winnerShare",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "platformFee",
+          "type": "u64",
+          "index": false
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidWagerAmount",
+      "msg": "Wager must be greater than zero."
+    },
+    {
+      "code": 6001,
+      "name": "InvalidAdjudicator",
+      "msg": "Adjudicator must be a real wallet, not the default pubkey."
+    },
+    {
+      "code": 6002,
+      "name": "UnauthorizedAdjudicator",
+      "msg": "Only the designated adjudicator account can settle this match."
+    },
+    {
+      "code": 6003,
+      "name": "UnauthorizedCancel",
+      "msg": "Only Player One can cancel this match."
+    },
+    {
+      "code": 6004,
+      "name": "MatchAlreadySettled",
+      "msg": "This match has already been settled and paid out."
+    },
+    {
+      "code": 6005,
+      "name": "MatchCancelled",
+      "msg": "This match was cancelled."
+    },
+    {
+      "code": 6006,
+      "name": "MatchAlreadyFull",
+      "msg": "This match already has two players."
+    },
+    {
+      "code": 6007,
+      "name": "MatchNotFull",
+      "msg": "Match needs two players before it can be settled."
+    },
+    {
+      "code": 6008,
+      "name": "CannotPlayYourself",
+      "msg": "You cannot play against yourself."
+    },
+    {
+      "code": 6009,
+      "name": "InvalidWinnerID",
+      "msg": "Winner ID must be 1 (Player One) or 2 (Player Two)."
+    },
+    {
+      "code": 6010,
+      "name": "WinnerMismatch",
+      "msg": "The winner account provided does not match the actual winner of the game."
+    },
+    {
+      "code": 6011,
+      "name": "MathOverflow",
+      "msg": "Critical math operation overflowed or underflowed."
+    },
+    {
+      "code": 6012,
+      "name": "InsufficientVaultFunds",
+      "msg": "The program vault does not have enough balance to settle the payouts."
+    },
+    {
+      "code": 6013,
+      "name": "PlatformFeeReceiverMismatch",
+      "msg": "The platform fee receiver account provided does not match the hardcoded treasury wallet."
+    },
+    {
+      "code": 6014,
+      "name": "InvalidHardcodedWallet",
+      "msg": "Failed parsing the hardcoded treasury public key."
+    }
+  ]
+}
