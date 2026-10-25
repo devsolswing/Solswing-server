@@ -1,4 +1,125 @@
-le call: one share per
+l(mmTimer); mmTimer=null; }
+  if(realMode() && chain.escrowSig && !chain.joined){ chainCancel().catch(function(){}); } // match never filled on-chain → real refund via cancel_match
+  log('[matchmaking] opponent disconnected during countdown · match cancelled · wager refunded','ruglog');
+  $('mm-label').textContent='✕ MATCH CANCELLED';
+  var n=$('mm-num'); n.textContent='✕'; n.style.color='var(--red)';
+  $('mm-note').textContent=oppName+' disconnected — match cancelled. Your wager is refunded; sending you back to the lobby.';
+  $('mm-disconnect').classList.add('hidden');
+  setTimeout(function(){
+    cleanupMatchmaking();
+    $('btn-start').classList.remove('hidden');
+    $('mm-label').textContent='⚔️ OPPONENT FOUND — MATCH STARTS IN'; // reset the overlay face for next time
+    showScreen('lobby'); // the remaining player returns to the lobby
+  }, 1800);
+}
+function mmDisconnect(){
+  // YOU disconnect during the countdown → cancel it, wallet disconnected,
+  // straight back to the lobby; the match never starts. The on-chain
+  // escrow (if any) is refunded via cancel_match BEFORE the wallet drops,
+  // because the refund needs your signature.
+  if(realMode() && chain.escrowSig && !chain.joined && !chain.cancelSig){
+    cleanupMatchmaking();
+    chainCancel().catch(function(){}).then(function(){ disconnectWallet(); showScreen('lobby'); });
+    log('[matchmaking] you disconnected during the countdown · on-chain refund sent · match cancelled','ruglog');
+    return;
+  }
+  cleanupMatchmaking();
+  disconnectWallet();
+  showScreen('lobby');
+  log('[matchmaking] you disconnected during the countdown · match cancelled · wager refunded','ruglog');
+}
+$('mm-disconnect').addEventListener('click', mmDisconnect);
+$('btn-cancel-queue').addEventListener('click', function(){
+  if(matchMode==='pvp' && pvpSocket){ // online PvP searching: no stake has landed yet — just leave the queue
+    onlineClose();
+    waiting=false; lockWager(false); $('wager').disabled=false;
+    $('btn-cancel-queue').classList.add('hidden'); $('btn-start').classList.remove('hidden');
+    setStatus('Queue cancelled — no match, no charge.');
+    log('[online] queue cancelled by player');
+    return;
+  }
+  if(!waiting) return;
+  var wasReal=realMode() && chain.escrowSig && !chain.joined;
+  cleanupMatchmaking();
+  $('btn-start').classList.remove('hidden');
+  if(wasReal){ // the escrow is real — refund it on-chain via cancel_match
+    setStatus('⏳ Cancelling on-chain — approve the refund in Phantom…');
+    chainCancel().then(function(){ setStatus('✓ Queue cancelled — wager refunded on-chain. No match, no charge.'); })
+      .catch(function(e){ setStatus('⚠ On-chain cancel failed — your escrow is still locked in the match vault; leaving and re-entering the game screen retries the refund.'); });
+    log('[matchmaking] queue cancelled by player · on-chain refund requested');
+  } else {
+    setStatus('Queue cancelled — your wager was refunded. No match, no charge.');
+    log('[matchmaking] queue cancelled by player · wager refunded');
+  }
+});
+
+// ---------- Post-match flow: the INSTANT a best-of-3 is decided, the player
+// is DISCONNECTED from the game session — every timer stopped, all match
+// state cleared, session released — and relocated to the lobby (the screen
+// they came from), where the match-stats popup greets them. Round
+// transitions never come through here — they use the countdown above. ----------
+var MATCH_WIN_LINES=[
+  'Certified rug-dodger! Your fingers are faster than a validator on espresso — the bot has filed a formal complaint.',
+  'Diamond hands? Please. LIGHTNING hands. You sold so fast the chart needed a neck brace.',
+  'The dev rugged, the bot blinked, and you were already counting your SOL. Somewhere a jeet is crying into his ramen.'
+];
+var MATCH_LOSS_LINES=[
+  'Rugged, rugged, and rugged again. The bot sends its regards — and your SOL sends a postcard.',
+  'That exit was so late, archaeologists are studying it. Revenge is exactly one "Join Game" tap away, legend.',
+  'Paper hands? More like concrete shoes. But every chad was once a jeet who clicked Join Game one more time.'
+];
+function disconnectSession(){
+  clearTimers(); hideRoundCountdown(false); cancelPregameCountdown(); cleanupMatchmaking();
+  lockWager(false); mmWager=null; // match over — the selector is free again, and no stale PvP stake can leak into the next match's math
+  if(matchEndTimer){ clearTimeout(matchEndTimer); matchEndTimer=null; }
+  active=false; rugged=false; youMs=null; botMs=null; rugStamp=0;
+  wins=0; losses=0; roundNo=1; dots();
+  oppName='Swing Bot'; oppShort='Bot'; oppSnap=false; telMatch={you:[],opp:[]}; roundTel=null;
+  var dlbl=$('chart-score-label'); if(dlbl) dlbl.textContent='Match score · You – Bot';
+  $('rug').classList.remove('active');
+  var sell=$('btn-sell'); sell.classList.add('hidden'); sell.disabled=true;
+  var bs=$('btn-start'); bs.classList.remove('hidden'); bs.textContent=(matchMode==='pvp')?'Find PvP Match — Stake & Play':'Queue Match — Stake & Play';
+  log('[session] disconnected from game session · all match state cleared · timers stopped');
+}
+function telCommit(who){
+  var yRec={rt:(youMs!=null?youMs:null), sold:(youMs!=null), inputs:[], moves:0, pre:0};
+  if(roundTel){
+    yRec.moves=roundTel.moves;
+    for(var i=0;i<roundTel.events.length;i++){ var d=roundTel.events[i]-rugStamp; if(d<0) yRec.pre++; else yRec.inputs.push(d); }
+    roundTel=null;
+  }
+  if(yRec.sold&&yRec.inputs.length===0) yRec.inputs.push(yRec.rt);
+  telMatch.you.push(yRec);
+  var oSold=(who==='bot');
+  var oRec={rt:(oSold?botMs:null), sold:oSold, inputs:[], moves:0, pre:0};
+  if(oSold){ oRec.inputs.push(botMs); oRec.moves=oppSnap?0:Math.round(12+Math.random()*48); }
+  telMatch.opp.push(oRec);
+}
+function reviewWinner(side){
+  var all=telMatch[side]||[], recs=[], i;
+  for(i=0;i<all.length;i++){ if(all[i].sold&&all[i].rt!=null) recs.push(all[i]); }
+  var out={voided:false, score:0};
+  if(recs.length<2) return out;
+  var rts=recs.map(function(r){ return r.rt; });
+  var mean=0, mv=0, k;
+  for(k=0;k<rts.length;k++) mean+=rts[k];
+  mean/=rts.length;
+  var varSum=0; for(k=0;k<rts.length;k++) varSum+=(rts[k]-mean)*(rts[k]-mean);
+  var sd=Math.sqrt(varSum/rts.length), cv=mean>0?sd/mean:1;
+  var mx=Math.max.apply(null,rts), mn=Math.min.apply(null,rts);
+  for(k=0;k<recs.length;k++) mv+=recs[k].moves;
+  mv/=recs.length;
+  var fast=(mean<100&&mx<130), steady=(cv<0.08&&(mx-mn)<25), still=(mv<2);
+  out.score=(fast?45:0)+(steady?30:0)+(still?25:0);
+  out.voided=(fast&&steady&&still);
+  return out;
+}
+function endMatch(won, note){
+  var w=(matchWager!==null?matchWager:wager()); // this match's stake per player
+  var pot=w*2;
+  var finalScore=wins+' – '+losses; // captured BEFORE the session state is wiped
+  var oppLbl=oppShort; // likewise captured before the wipe
+  // Settlement shape mirrors the adjudicator's settle call: one share per
   // side — winner side, loser side, house side — always summing to the pot.
   var verdict=reviewWinner(won?'you':'opp');
   var settle={winner:(won?'you':'opp'), voided:verdict.voided, score:verdict.score,
@@ -9,6 +130,7 @@ le call: one share per
   if(matchMode==='bot'){ // house ledger: every bot match moves the give-back curve (forfeits count as losses, but not as played matches)
     var led=loadBotLedger(); led.wagered+=w; led.won+=payout; if(note!=='Forfeited') led.matches++; led.lastWager=w; saveBotLedger(led);
     recordWager(w); // rewards: every staked SOL counts toward points + levels
+    recordMatchResult(won, payout, matchBestMs); // leaderboard: W/L, P&L, fastest reflex
   }
   // REAL on-chain matches: the anti-bot review stays STAGED (it never moves
   // money) — settle_match only knows winner 1 or 2, so a flagged result
@@ -294,6 +416,7 @@ function finishRound(who){
   if(!active) return; active=false; clearTimers();
   $('rug').classList.remove('active'); // round decided — clear the rug flash, result lives in the status line
   if(who==='you'&&youMs==null) youMs=Date.now()-rugStamp;
+  if(youMs!=null && (matchBestMs==null || youMs<matchBestMs)) matchBestMs=youMs; // fastest reflex this match
   if(botMs==null) botMs=9999;
   telCommit(who);
   $('btn-sell').classList.add('hidden'); $('btn-start').classList.remove('hidden'); $('btn-start').textContent='Queue Next Round';
