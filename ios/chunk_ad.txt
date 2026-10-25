@@ -1,4 +1,6 @@
-untdown
+tion tick(){
+    if(!mmActive) return;
+    if(!$('screen-game').classList.contains('active')||!walletConnected){ cleanupMatchmaking(); $('btn-start').classList.remove('hidden'); log('[matchmaking] countdown cancelled — player left · wager refunded','ruglog'); return; } // you disconnected mid-countdown
     if(mmOppDropAt && Date.now()>=mmOppDropAt){ opponentDropped(); return; }
     var remain=Math.ceil((mmDeadline-Date.now())/1000);
     if(remain<=0){ // zero → round 1 begins automatically

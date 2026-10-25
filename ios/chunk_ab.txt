@@ -1,4 +1,8 @@
-lass="flow-step"><i>STEP 4 · SETTLE ON-CHAIN</i><h3>Adjudicator pays out</h3><p>Only the adjudicator (game server key) can call <span class="mono">settle_match</span>. The program checks the winner, then pays 94% to the winner and 6% to the treasury with checked math.</p></div>
+ss="flow">
+      <div class="flow-step"><i>STEP 1 · ESCROW</i><h3>Both players stake</h3><p><span class="mono">initialize_match</span> (P1) + <span class="mono">join_match</span> (P2) lock equal wagers into a PDA vault. Two-phase, so nobody has to co-sign someone else's transaction.</p></div>
+      <div class="flow-step"><i>STEP 2 · SERVER ROUND</i><h3>Server picks the rug</h3><p>The Node server picks a secret rug moment, streams <span class="mono">tick</span> messages to both clients, then broadcasts <span class="mono">rug</span>. Clients learn it at the same instant the server stamps it.</p></div>
+      <div class="flow-step"><i>STEP 3 · REFLEX RACE</i><h3>Fastest sell wins</h3><p>Server timestamps sell messages on arrival — client timestamps are ignored. Late sells (&gt;5s), double sells, disconnects and hidden-tab forfeits are all handled server-side.</p></div>
+      <div class="flow-step"><i>STEP 4 · SETTLE ON-CHAIN</i><h3>Adjudicator pays out</h3><p>Only the adjudicator (game server key) can call <span class="mono">settle_match</span>. The program checks the winner, then pays 94% to the winner and 6% to the treasury with checked math.</p></div>
     </div>
   </div>
 
@@ -874,14 +878,4 @@ var telMatch={you:[],opp:[]}, roundTel=null, oppSnap=false, oppSnapMs=30; // per
 
 function wager(){ return Math.max(0.01, parseFloat($('wager').value)||0.1); }
 // The wager selector locks the moment a stake flow begins (pre-game or
-// matchmaking countdown, queue, signing) and stays locked until the match
-// ends or the flow aborts — the amount being played for can never change
-// mid-flight, so the pot lines and the payout math always match the stake
-// that was actually signed.
-function lockWager(lock){ var s=$('wager'); if(s) s.disabled=!!lock; }
-function fmt(n,d){ return n.toFixed(d==null?3:d); }
-function updatePot(){
-  var w=wager(), pot=w*2;
-  $('pot-line').textContent=fmt(pot)+' SOL'; $('win-line').textContent=fmt(pot*0.94)+' SOL'; $('fee-line').textContent=fmt(pot*0.06)+' SOL';
-  updateHUD();
-  if(typeof updateFaucetNote==='function') updateFaucetNot
+// matchmaking countdown, queue, signing) a

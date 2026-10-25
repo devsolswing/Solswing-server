@@ -53,6 +53,13 @@ a{color:var(--green)}
 .pill-chart{width:30px;height:22px;flex:none;opacity:.92}
 .logo-tag{font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;background:#041207;color:#86efac;padding:4px 8px;border-radius:999px;white-space:nowrap;box-shadow:inset 0 0 0 1px rgba(134,239,172,.35)}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.08em;font-weight:700;padding:5px 9px;border-radius:999px;border:1px solid var(--line);text-transform:uppercase}
+/* load-screen pill logo — pump.fun-style capsule, SolSwing imprinted like a real pill (seam + shine, gentle bob) */
+.pill-logo{display:inline-flex;align-items:center;justify-content:center;min-width:180px;height:48px;padding:0 22px;border-radius:999px;background:linear-gradient(180deg,#4ade80,#16a34a);color:#041207;font-weight:800;font-size:21px;letter-spacing:.5px;box-shadow:0 6px 20px rgba(34,197,94,.45),inset 0 2px 0 rgba(255,255,255,.5),inset 0 -3px 0 rgba(0,0,0,.15);position:relative;overflow:hidden;animation:pill-bob 3s ease-in-out infinite}
+.pill-logo::before{content:'';position:absolute;left:14px;top:7px;width:60px;height:13px;border-radius:999px;background:rgba(255,255,255,.45);filter:blur(1px)}
+.pill-logo::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;background:rgba(4,18,7,.18)}
+@keyframes pill-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+.how-steps{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.how-step{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--line2);background:var(--bg2);color:var(--muted)}
 .pill.red{background:var(--red);color:#fff;border-color:transparent} .pill.green{color:var(--green);border-color:#14532d;background:#052e16}
 .pill.live-dot::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(34,197,94,.15)}
 .top-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -79,6 +86,8 @@ a{color:var(--green)}
   .hero-copy p{font-size:13px;line-height:1.45;margin:0 0 10px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
   .stat{padding:8px}
   #btn-enter{margin-top:10px}
+  .pill-logo{min-width:160px;height:44px;font-size:19px}
+  .how-step{font-size:11px;padding:5px 8px}
 }
 .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .stat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px}
@@ -440,9 +449,11 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <div class="sticker">PUMP IT!</div>
     </div>
     <div class="hero-copy">
-      <span class="pill">Best of 3 • Reflex race • 94% to winner</span>
+      <span class="pill-logo"><span style="position:relative;z-index:1">SolSwing</span></span>
+      <p style="font-size:12.5px;color:var(--muted);margin:8px 0 0">The friendliest reflex game on Solana</p>
       <h1>Watch it pump.<br>Beat the rug.</h1>
-      <p>Two players stake SOL. The chart pumps for a secret 4–9 seconds, then the dev rugs. First sell wins the round. First to 2 rounds takes <b style="color:var(--text)">94% of the pot</b> on-chain — 6% goes to the arena treasury. Connect Phantom and the wagering is genuinely on-chain: stakes escrow into the deployed SolSwing program on Solana devnet and settle 94/6 at match end. Devnet SOL is free play money. (In production a game server referees the timing; this hosted build runs that referee in-page.)</p>
+      <p>Two players stake SOL. The chart pumps, then the dev rugs — first to sell wins the round. Win 2 rounds and take <b style="color:var(--text)">94% of the pot</b>. That's it!</p>
+      <div class="how-steps"><span class="how-step">1 · Pick a name</span><span class="how-step">2 · Connect Phantom</span><span class="how-step">3 · Sell before the rug!</span></div>
       <div class="stats">
         <div class="stat"><strong id="stat-pot">Min 0.01 SOL</strong><span>Match pot</span></div>
         <div class="stat"><strong>4–9s</strong><span>Until rug</span></div>
@@ -650,8 +661,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
   <div class="section">
     <h2>Game-server based, not browser-trusted</h2>
     <p class="lead">The original version decided everything in the browser — anyone could edit the rug time or fake a win. SolSwing flips that: the server is the referee, the Solana program is the vault.</p>
-    <div class="flow">
-      <div class="flow-step"><i>STEP 1 · ESCROW</i><h3>Both players stake</h3><p><span class="mono">initialize_match</span> (P1) + <span class="mono">join_match</span> (P2) lock equal wagers into a PDA vault. Two-phase, so nobody has to co-sign someone else's transaction.</p></div>
-      <div class="flow-step"><i>STEP 2 · SERVER ROUND</i><h3>Server picks the rug</h3><p>The Node server picks a secret rug moment, streams <span class="mono">tick</span> messages to both clients, then broadcasts <span class="mono">rug</span>. Clients learn it at the same instant the server stamps it.</p></div>
-      <div class="flow-step"><i>STEP 3 · REFLEX RACE</i><h3>Fastest sell wins</h3><p>Server timestamps sell messages on arrival — client timestamps are ignored. Late sells (&gt;5s), double sells, disconnects and hidden-tab forfeits are all handled server-side.</p></div>
-      <div c
+    <div cla

@@ -1,4 +1,14 @@
-e();
+nd stays locked until the match
+// ends or the flow aborts — the amount being played for can never change
+// mid-flight, so the pot lines and the payout math always match the stake
+// that was actually signed.
+function lockWager(lock){ var s=$('wager'); if(s) s.disabled=!!lock; }
+function fmt(n,d){ return n.toFixed(d==null?3:d); }
+function updatePot(){
+  var w=wager(), pot=w*2;
+  $('pot-line').textContent=fmt(pot)+' SOL'; $('win-line').textContent=fmt(pot*0.94)+' SOL'; $('fee-line').textContent=fmt(pot*0.06)+' SOL';
+  updateHUD();
+  if(typeof updateFaucetNote==='function') updateFaucetNote();
 }
 $('wager').addEventListener('input',updatePot); $('wager').addEventListener('change',updatePot); updatePot();
 
@@ -899,6 +909,4 @@ function showMmCountdown(){
   // opponentDropped(), which cancels and returns YOU to the lobby.
   mmOppDropAt=(Math.random()<0.15) ? Date.now()+1600+Math.random()*2200 : 0;
   var numEl=$('mm-num'); numEl.style.color='';
-  function tick(){
-    if(!mmActive) return;
-    if(!$('screen-game').classList.contains('active')||!walletConnected){ cleanupMatchmaking(); $('btn-start').classList.remove('hidden'); log('[matchmaking] countdown cancelled — player left · wager refunded','ruglog'); return; } // you disconnected mid-co
+  func
