@@ -1,4 +1,15 @@
-ntListener('click', function(){
+— 5s countdown overlay, then the next round starts itself
+  updateHUD();
+}
+function forfeit(reason){
+  if(!active) return; active=false; clearTimers(); losses=2; dots();
+  log('[server] forfeit · '+reason,'ruglog');
+  endMatch(false, 'Forfeited'); // decided → disconnect NOW: lobby + stats popup
+}
+// Queue / Join Game = start the PRE-GAME COUNTDOWN first. Only when it
+// completes (player still connected) does the stake signature open —
+// no signature → no match, no SOL moved.
+$('btn-start').addEventListener('click', function(){
   if(active||signPending||pregameActive||waiting||mmActive) return;
   if(!walletConnected){ openConnectModal(); return; } // no wallet → the connect popup, right here on the game screen
   if(walletDemo && wins===0 && losses===0 && demoBalance < wager()-1e-9){ setStatus('Demo wallet is short for a '+fmt(wager())+' SOL wager — disconnect the demo wallet and reconnect it to top back up to 10 SOL.'); return; } // a stake the balance can't cover is never signed (the real wallet path enforces the same rule on-chain via the 'insufficient' check)

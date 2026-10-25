@@ -1,4 +1,14 @@
-OGRAM_ID_STR);
+ig=sig; chain.lastTx=sig;
+  log('[chain] join_match confirmed · opponent stake locked · pot '+fmt(wagerSol*2)+' SOL · tx '+shortSig(sig),'winlog');
+  return sig;
+}
+// cancel_match — abandoned-match refund path. Only valid pre-join, which
+// is exactly when the UI offers it (queue cancel, opponent drop, leaving).
+async function chainCancel(){
+  if(!chain.escrowSig || chain.joined || chain.cancelSig || chain.cancelBusy) return null;
+  chain.cancelBusy=true;
+  try{
+    var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
     var ix=new solanaWeb3.TransactionInstruction({
       programId:pid,
       keys:[
@@ -761,15 +771,4 @@ function finishRound(who){
   else { losses++; if(youMs!=null){ setStatus('🔴 '+oppShort+' beat you — '+botMs+'ms vs your '+youMs+'ms.'); } else { setStatus('🔴 RUGGED! '+oppShort+' sold in '+botMs+'ms — you never exited.'); } log('[server] round_result winner=opponent · '+botMs+'ms','ruglog'); }
   dots(); roundNo++;
   if(wins>=2||losses>=2){ endMatch(wins>=2); } // decided → disconnect NOW: lobby + stats popup (see endMatch)
-  else { showRoundCountdown(); } // match not decided — 5s countdown overlay, then the next round starts itself
-  updateHUD();
-}
-function forfeit(reason){
-  if(!active) return; active=false; clearTimers(); losses=2; dots();
-  log('[server] forfeit · '+reason,'ruglog');
-  endMatch(false, 'Forfeited'); // decided → disconnect NOW: lobby + stats popup
-}
-// Queue / Join Game = start the PRE-GAME COUNTDOWN first. Only when it
-// completes (player still connected) does the stake signature open —
-// no signature → no match, no SOL moved.
-$('btn-start').addEve
+  else { showRoundCountdown(); } // match not decided 

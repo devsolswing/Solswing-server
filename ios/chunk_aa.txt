@@ -416,7 +416,7 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
   <section class="screen active" id="screen-landing">
   <div class="hero">
     <div class="hero-card alive">
-      <img class="hero-img" src="assets/concept-art.jpg" alt="Cartoon Shiba in a Doge Wif Hat hoodie playing the retro PUMPSWING game — the original SolSwing concept art">
+      <img class="hero-img" alt="Cartoon Shiba in a golf cap holding a club on a sunny golf course">
       <div class="scanlines"></div>
       <div class="crt-glow"></div>
       <div class="chip score">SCORE <span id="alive-score">12,850</span></div>
@@ -443,6 +443,17 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
        wallet happens in a popup on the game screen (#connect-modal).
        Post-match: the player lands here already disconnected from the game
        session; the match-stats popup (#match-modal) greets them on arrival. -->
+<script>
+// Golf Shiba centerpiece: image lives as base64 parts in ios/ (same host as the game chunks)
+(function(){
+  var base='https://raw.githubusercontent.com/devsolswing/Solswing-server/main/ios/';
+  var parts=['golf-shiba-b64-1.txt','golf-shiba-b64-2.txt','golf-shiba-b64-3.txt'];
+  Promise.all(parts.map(function(p){return fetch(base+p).then(function(r){return r.text();});})).then(function(c){
+    var img=document.querySelector('#screen-landing .hero-img');
+    if(img) img.src='data:image/jpeg;base64,'+c.join('').replace(/\s/g,'');
+  }).catch(function(){});
+})();
+</script>
   <section class="screen" id="screen-lobby">
     <div class="lobby-bg" aria-hidden="true"><div class="wash"></div><div class="layer far"></div><div class="layer near"></div></div>
     <div class="screen-head">
@@ -590,5 +601,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
 
     <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
     <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not real-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
-    <details class="faq"><summary>How do I actually win?</summary><p>Pure reflexes. When the dev rugs, hit SELL (or press <span class="kbd">Space</span>) faster than your opponent. The server stamps your sell the moment it arrives — your own clock doesn't count — and sells later than 5 seconds after the rug don't count at all. Win 2 rounds to take the match.</p></details>
-    <details class="faq"><summary>Why does the winner get 94% and not 100%?</summary><p>The remaining 6% is the arena fee. It's fixed in the smart contract, goes to the SolSwing treasury wallet, and pays for the game server,
+    <details class="faq"><summary>How do I actually win?</summary><p>Pure reflexes. When the
