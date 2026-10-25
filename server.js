@@ -344,26 +344,6 @@ function broadcastPresence() {
     wss.clients.forEach((c) => { if (c.readyState === WebSocket.OPEN) c.send(payload); });
 }
 
-// ---- Swing Bot: the ONLY bot in chat, here for fun. One lighthearted line
-// every 5 minutes while anyone is connected — never fake human players. ----
-const SWING_BOT_LINES = [
-    'beep boop. queue up, humans — the next match needs a victim',
-    'I sold at 250ms once. once. I still bring it up at parties.',
-    'dev rugs in 4–9 seconds. I have seen all of them. I feel nothing.',
-    'gg means "good game". I say it even when I win. I am polite like that.',
-    'fun fact: I have never blinked. this is my edge.',
-    'paper hands? never met them. I hold until the red flash.',
-];
-let swingBotLine = 0;
-setInterval(() => {
-    let anyone = false;
-    wss.clients.forEach((c) => { if (c.readyState === WebSocket.OPEN) anyone = true; });
-    if (!anyone) return;
-    const payload = JSON.stringify({ type: 'chat', user: 'Swing Bot', text: SWING_BOT_LINES[swingBotLine % SWING_BOT_LINES.length], ts: Date.now() });
-    swingBotLine++;
-    wss.clients.forEach((c) => { if (c.readyState === WebSocket.OPEN) c.send(payload); });
-}, 300000);
-
 wss.on('connection', (ws) => {
     ws.msgTimestamps = [];
     ws.lastQueueAt = 0;
