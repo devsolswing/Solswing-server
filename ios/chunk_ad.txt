@@ -1,4 +1,25 @@
-ontent='⏳ Settling on-chain — approve in Phantom…'; }
+n:won, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:note||'', voided:false, mode:matchMode } };
+    if(realMode()) chainDoSettle();
+    else log('[chain] settle_match still owed — reconnect the wallet to sign it and release the pot','ruglog');
+  }
+}
+function openMatchResult(s){
+  var ov=$('match-modal'); if(!ov) return;
+  ov.classList.toggle('loss', !s.won);
+  $('mm-title').textContent=s.voided?'🏁 MATCH COMPLETE':(s.won?'🏆 YOU WIN THE MATCH!':'💀 YOU LOST THE MATCH');
+  var funnyLines=(matchMode==='pvp') ? (s.won?MATCH_WIN_LINES_PVP:MATCH_LOSS_LINES_PVP) : (s.won?MATCH_WIN_LINES:MATCH_LOSS_LINES);
+  $('mm-funny').textContent=funnyLines[Math.floor(Math.random()*funnyLines.length)];
+  var resEl=$('mm-result');
+  resEl.textContent=(s.won?'WIN':'LOSS')+(s.note?' · '+s.note:'');
+  resEl.style.color=s.won?'var(--green)':'var(--red)';
+  var pnlEl=$('mm-pnl');
+  pnlEl.textContent=(s.pnl>0?'+':s.pnl<0?'−':'')+fmt(Math.abs(s.pnl))+' SOL';
+  pnlEl.style.color=s.pnl>0?'var(--green)':(s.pnl<0?'var(--red)':'');
+  $('mm-wagered').textContent=fmt(s.wagered)+' SOL';
+  $('mm-score').textContent='You '+s.score+' '+(s.oppLabel||'Bot');
+  if(realMode() && chain.settleSig){ setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(chain.settleSig)+'" target="_blank" rel="noopener">tx '+shortSig(chain.settleSig)+' ↗</a>'); }
+  else if(s.settleTx){ setMmSettle('✓ Settled on-chain by the server · <a href="'+explorerTx(s.settleTx)+'" target="_blank" rel="noopener">tx '+shortSig(s.settleTx)+' ↗</a>'); }
+  else if(realMode() && chain.pendingSettle){ $('mm-settle').textContent='⏳ Settling on-chain — approve in Phantom…'; }
   else if(chain.pendingSettle && !chain.settleSig){ $('mm-settle').textContent='⏳ Settlement owed on-chain — reconnect your wallet, then tap here to sign settle_match.'; }
   else { $('mm-settle').textContent=s.voided? '0.000 SOL payout · settled by the adjudicator' : (s.won? (fmt(s.payout)+' SOL payout · ✓ Signed by your wallet') : 'Stake to winner · ✓ stake was signed by your wallet'); }
   ov.classList.add('open');
