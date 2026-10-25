@@ -655,7 +655,7 @@ function closeRefundResult(force){
 }
 $('refund-modal-close').addEventListener('click', closeRefundResult);
 $('refund-modal').addEventListener('click', function(e){ if(e.target===this) closeRefundResult(); });
-$('rf-join').addEventListener('click', function(){ closeRefundResult(); showScreen('game'); if(walletConnected) $('btn-start').click(); });
+$('rf-join').addEventListener('click', function(){ closeRefundResult(); showScreen('game'); }); // Join Game only navigates — no match starts until the player presses Queue
 $('rf-disconnect').addEventListener('click', function(){ closeRefundResult(); disconnectWallet(); });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -785,4 +785,4 @@ function disconnectWallet(){
   if(signPending) settleSignature(false); // an armed signature request dies with the session — it must never resolve against a disconnected wallet
   // An open, unfilled on-chain escrow gets its cancel_match refund fired
   // BEFORE the wallet drops — the refund needs your signature.
-  if(realMode() && phantomProvider() && chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig){ var cp=chainCancel(); if(cp&&cp.cat
+  if(realMode() && phantomProvider() && chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig){ 

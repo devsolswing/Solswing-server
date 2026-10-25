@@ -1,4 +1,4 @@
-ch) cp.catch(function(){}); }
+var cp=chainCancel(); if(cp&&cp.catch) cp.catch(function(){}); }
   var wasPhantom=walletConnected && !walletDemo;
   // An unsettled JOINED match keeps its whole chain context across the
   // disconnect: its pot is locked on-chain and its settle is still owed.
@@ -20,8 +20,7 @@ ch) cp.catch(function(){}); }
 }
 $('btn-join-game').addEventListener('click', function(){
   closeMatchResult();
-  showScreen('game'); // no wallet → the game screen's connect popup greets them there
-  if(walletConnected) $('btn-start').click(); // a fresh match is a fresh stake — routes through the signature guard like every stake
+  showScreen('game'); // no wallet → the game screen's connect popup greets them there — and no match starts until the player presses Queue
 });
 $('btn-disconnect').addEventListener('click', disconnectWallet);
 function finishRound(who){
@@ -252,8 +251,7 @@ $('wallet-btn').addEventListener('click', function(){ if(walletConnected) openWa
 // into Queue, which runs the pre-game countdown and the wallet-signature
 // guard before any SOL can move.
 $('lobby-join-btn').addEventListener('click', function(){
-  showScreen('game');
-  if(walletConnected) $('btn-start').click();
+  showScreen('game'); // Join Game only navigates to screen 3 — no match starts until the player presses Queue there
 });
 
 // ---------- Wallet popup: the player's own address + session stats ----------
