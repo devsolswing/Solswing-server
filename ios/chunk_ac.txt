@@ -1,4 +1,36 @@
- on this hosted build)
+lam; balanceText=fmt(lam/1e9)+' SOL · devnet';
+      return lam;
+    }catch(e){ if(attempt===0) await new Promise(function(r){ setTimeout(r,700); }); }
+  }
+  return null;
+}
+function updateFaucetNote(){
+  var el=$('faucet-note'); if(!el) return;
+  var short = realMode() && chain.balanceLamports!==null && chain.balanceLamports < (Math.round(wager()*1e9)+3000000);
+  el.classList.toggle('hidden', !short);
+}
+// initialize_match — the player's REAL escrow. Throws Error('insufficient')
+// when the wallet can't cover wager + rent/fees (faucet territory).
+async function chainStake(wagerSol){
+  var lamports=Math.round(wagerSol*1e9);
+  // Refund any previous abandoned escrow before opening a new match.
+  if(chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig && phantomProvider()){
+    try{ await chainCancel(); }catch(e){ /* previous escrow stays locked on-chain; the new stake still proceeds */ }
+  }
+  chain.matchId=newMatchId();
+  var pdas=derivePdas(chain.matchId); chain.matchState=pdas.matchState; chain.vault=pdas.vault;
+  chain.joined=false; chain.escrowSig=null; chain.joinSig=null; chain.settleSig=null; chain.cancelSig=null; chain.pendingSettle=null;
+  var bal=await chainConn().getBalance(chain.playerKey);
+  chain.balanceLamports=bal; updateFaucetNote();
+  if(bal < lamports+3000000) throw new Error('insufficient');
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  var ix=new solanaWeb3.TransactionInstruction({
+    programId:pid,
+    keys:[
+      { pubkey:chain.matchState, isSigner:false, isWritable:true },
+      { pubkey:chain.vault, isSigner:false, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:true, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:false, isWritable:false }, // adjudicator: your wallet (house matches on this hosted build)
       { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
     ],
     data:ixData(DISC.initialize_match, [u64le(chain.matchId), u64le(lamports)])
@@ -147,6 +179,68 @@ function botScaledParams(w){
   var x=Math.min(Math.max(w||0.01, 0.01), 1);
   return { low:Math.round(220 - 70*x), high:Math.round(450 - 130*x), snap:0.10 + 0.20*x };
 }
+// ---------- REWARDS & STATS — wagered SOL → points → 9-tier levels ----------
+// 0.01 SOL = 10 points, so points = wagered SOL × 1000. Levels double:
+// 1000, 2000, 4000, … 256000. Tiers: 1–3 Bronze, 4–6 Silver, 7–9 Gold.
+// Rewards are $SWING airdrops (planned — the token hasn't launched, so they
+// are shown as upcoming, never as claimable). Records live on-device, keyed
+// by wallet — the wallet IS the player.
+var RW_LEVELS=[
+  {level:1, pts:1000, reward:5}, {level:2, pts:2000, reward:10}, {level:3, pts:4000, reward:20},
+  {level:4, pts:8000, reward:40}, {level:5, pts:16000, reward:80}, {level:6, pts:32000, reward:160},
+  {level:7, pts:64000, reward:320}, {level:8, pts:128000, reward:640}, {level:9, pts:256000, reward:1280}
+];
+function rwTier(level){ if(level<=0) return '—'; if(level<=3) return '🥉 Bronze'; if(level<=6) return '🥈 Silver'; return '🥇 Gold'; }
+function rwKey(){
+  try{ if(chain && chain.playerKey) return 'solswing_rewards_'+chain.playerKey.toBase58(); }catch(e){}
+  return 'solswing_rewards_local';
+}
+function loadRewards(){ try{ var r=JSON.parse(localStorage.getItem(rwKey())||'null'); if(r && typeof r.wagered==='number') return r; }catch(e){} return {wagered:0}; }
+function saveRewards(r){ try{ localStorage.setItem(rwKey(), JSON.stringify(r)); }catch(e){} }
+function recordWager(sol){ if(!sol || sol<=0) return; var r=loadRewards(); r.wagered=(r.wagered||0)+sol; saveRewards(r); }
+function rwState(){
+  var r=loadRewards(); var wagered=r.wagered||0; var pts=Math.floor(wagered*1000);
+  var level=0; for(var i=0;i<RW_LEVELS.length;i++){ if(pts>=RW_LEVELS[i].pts) level=RW_LEVELS[i].level; }
+  var next=level<RW_LEVELS.length ? RW_LEVELS[level] : null;
+  var cur=level>0 ? RW_LEVELS[level-1] : null;
+  var prog=1;
+  if(next){ var base=cur?cur.pts:0; prog=Math.max(0, Math.min(1, (pts-base)/(next.pts-base))); }
+  return {wagered:wagered, pts:pts, level:level, tier:rwTier(level), next:next, cur:cur, prog:prog};
+}
+function openRewards(){
+  var s=rwState();
+  var wallet='Not connected';
+  try{ if(chain && chain.playerKey){ var a=chain.playerKey.toBase58(); wallet=a.slice(0,4)+'…'+a.slice(-4); } }catch(e){}
+  $('rw-wallet').textContent=wallet;
+  $('rw-wagered').textContent=fmt(s.wagered)+' SOL';
+  $('rw-points').textContent=s.pts.toLocaleString();
+  $('rw-level').textContent=s.level>0 ? ('Level '+s.level) : 'Unranked — wager 1 SOL to reach Level 1';
+  $('rw-tier').textContent=s.tier;
+  if(s.next){
+    $('rw-next').textContent='Level '+s.next.level+' at '+s.next.pts.toLocaleString()+' pts ($'+s.next.reward+' $SWING)';
+    $('rw-progress').style.width=Math.round(s.prog*100)+'%';
+    $('rw-note').textContent=s.level>0
+      ? ('Next reward: $'+s.next.reward+' $SWING at Level '+s.next.level+' — '+(s.next.pts-s.pts).toLocaleString()+' pts to go.')
+      : ('Wager '+fmt((1000-s.pts)/1000)+' SOL more to reach Level 1 and unlock a $5 $SWING airdrop.');
+  } else {
+    $('rw-next').textContent='Max level reached';
+    $('rw-progress').style.width='100%';
+    $('rw-note').textContent='Max level — $1,280 $SWING airdrop unlocked.';
+  }
+  var rows='';
+  for(var i=0;i<RW_LEVELS.length;i++){
+    var L=RW_LEVELS[i];
+    var reached=s.pts>=L.pts;
+    var isCur=s.level===L.level;
+    rows+='<div style="display:flex;justify-content:space-between;gap:8px;padding:7px 10px;border-radius:8px;margin:3px 0;background:'+(isCur?'rgba(34,197,94,.25)':(reached?'rgba(34,197,94,.12)':'rgba(255,255,255,.04)'))+';border:1px solid '+(isCur?'var(--green)':'var(--line)')+'"><span>'+(reached?'✓ ':'')+'Level '+L.level+' · '+rwTier(L.level)+'</span><span>'+L.pts.toLocaleString()+' pts · $'+L.reward+' $SWING</span></div>';
+  }
+  $('rw-levels').innerHTML=rows;
+  $('rewards-modal').classList.add('open');
+}
+function closeRewards(){ $('rewards-modal').classList.remove('open'); }
+$('rewards-tile').addEventListener('click', openRewards);
+$('rewards-modal-close').addEventListener('click', closeRewards);
+$('rewards-modal').addEventListener('click', function(e){ if(e.target===this) closeRewards(); });
 var botPhase='normal';
 
 function clearTimers(){ [tickTimer,rugTimer,botTimer,resolveTimer].forEach(function(x){ if(x){clearInterval(x); clearTimeout(x);} }); tickTimer=rugTimer=botTimer=resolveTimer=null; }
@@ -559,6 +653,7 @@ function onlineResult(m){
 function onlineEnd(m){
   var won=m.outcome==='win';
   var w=mmWager!==null?mmWager:wager();
+  recordWager(w); // rewards: every staked SOL counts toward points + levels
   var payout=won?parseFloat(m.payout||0):0;
   var score=wins+' – '+losses;
   var oppLbl=onlineOpp;
@@ -731,93 +826,4 @@ function disconnectSession(){
   log('[session] disconnected from game session · all match state cleared · timers stopped');
 }
 function telCommit(who){
-  var yRec={rt:(youMs!=null?youMs:null), sold:(youMs!=null), inputs:[], moves:0, pre:0};
-  if(roundTel){
-    yRec.moves=roundTel.moves;
-    for(var i=0;i<roundTel.events.length;i++){ var d=roundTel.events[i]-rugStamp; if(d<0) yRec.pre++; else yRec.inputs.push(d); }
-    roundTel=null;
-  }
-  if(yRec.sold&&yRec.inputs.length===0) yRec.inputs.push(yRec.rt);
-  telMatch.you.push(yRec);
-  var oSold=(who==='bot');
-  var oRec={rt:(oSold?botMs:null), sold:oSold, inputs:[], moves:0, pre:0};
-  if(oSold){ oRec.inputs.push(botMs); oRec.moves=oppSnap?0:Math.round(12+Math.random()*48); }
-  telMatch.opp.push(oRec);
-}
-function reviewWinner(side){
-  var all=telMatch[side]||[], recs=[], i;
-  for(i=0;i<all.length;i++){ if(all[i].sold&&all[i].rt!=null) recs.push(all[i]); }
-  var out={voided:false, score:0};
-  if(recs.length<2) return out;
-  var rts=recs.map(function(r){ return r.rt; });
-  var mean=0, mv=0, k;
-  for(k=0;k<rts.length;k++) mean+=rts[k];
-  mean/=rts.length;
-  var varSum=0; for(k=0;k<rts.length;k++) varSum+=(rts[k]-mean)*(rts[k]-mean);
-  var sd=Math.sqrt(varSum/rts.length), cv=mean>0?sd/mean:1;
-  var mx=Math.max.apply(null,rts), mn=Math.min.apply(null,rts);
-  for(k=0;k<recs.length;k++) mv+=recs[k].moves;
-  mv/=recs.length;
-  var fast=(mean<100&&mx<130), steady=(cv<0.08&&(mx-mn)<25), still=(mv<2);
-  out.score=(fast?45:0)+(steady?30:0)+(still?25:0);
-  out.voided=(fast&&steady&&still);
-  return out;
-}
-function endMatch(won, note){
-  var w=(matchWager!==null?matchWager:wager()); // this match's stake per player
-  var pot=w*2;
-  var finalScore=wins+' – '+losses; // captured BEFORE the session state is wiped
-  var oppLbl=oppShort; // likewise captured before the wipe
-  // Settlement shape mirrors the adjudicator's settle call: one share per
-  // side — winner side, loser side, house side — always summing to the pot.
-  var verdict=reviewWinner(won?'you':'opp');
-  var settle={winner:(won?'you':'opp'), voided:verdict.voided, score:verdict.score,
-    winnerShare:pot*0.94, loserShare:0, houseShare:pot*0.06};
-  if(verdict.voided){ settle.winnerShare=0; settle.loserShare=pot*0.5; settle.houseShare=pot*0.5; }
-  var payout=won? settle.winnerShare : settle.loserShare; // what lands back in YOUR wallet
-  var pnl=payout-w;
-  if(matchMode==='bot'){ // house ledger: every bot match moves the give-back curve (forfeits count as losses, but not as played matches)
-    var led=loadBotLedger(); led.wagered+=w; led.won+=payout; if(note!=='Forfeited') led.matches++; led.lastWager=w; saveBotLedger(led);
-  }
-  // REAL on-chain matches: the anti-bot review stays STAGED (it never moves
-  // money) — settle_match only knows winner 1 or 2, so a flagged result
-  // settles the pot to the NON-flagged side, 94/6 like any other match.
-  var isRealChain=realMode() && chain.joined && !!chain.escrowSig;
-  if(isRealChain && verdict.voided){
-    var flaggedYou=won; // the review inspected the winner — that's who got flagged
-    settle.winner=flaggedYou?'opp':'you'; settle.winnerShare=pot*0.94; settle.loserShare=0; settle.houseShare=pot*0.06;
-    payout=flaggedYou?0:pot*0.94; pnl=payout-w; verdict.voided=false; verdict.chainVoid=true;
-  }
-  recordMatch(won&&!verdict.voided&&!verdict.chainVoid, payout); // a flagged "win" the review overturned never counts as a won match in the stats
-  if(verdict.voided){
-    log('[server] match_end outcome=void · settle_match → adjudicator · winner share 0.000 SOL · loser refunded '+fmt(settle.loserShare)+' SOL', won?'ruglog':'winlog');
-    log(treasuryLockOk()?'[chain] house share '+fmt(settle.houseShare)+' SOL → treasury wallet · LOCKED ✓ (the one locked fee receiver)':'[chain] ⛔ TREASURY LOCK CHECK FAILED — settlement refused','winlog');
-  }
-  else if(won){ level++; log('[server] match_end outcome=win payout='+fmt(payout)+' SOL · settle_match → adjudicator','winlog'); log(treasuryLockOk()?'[chain] fee '+fmt(settle.houseShare)+' SOL (6%) → treasury wallet · LOCKED ✓ (the one locked fee receiver)':'[chain] ⛔ TREASURY LOCK CHECK FAILED — settlement refused','winlog'); }
-  else { if(level>1) level--; log('[server] match_end outcome=loss','ruglog'); }
-  $('rank').textContent='Level '+level+' · '+((won&&!verdict.voided)?'CHAD':'JEET');
-  if(walletDemo){ demoBalance=Math.max(0, demoBalance+pnl); balanceText=fmt(demoBalance)+' SOL · demo'; }
-  disconnectSession();   // 1 · disconnect immediately — session gone, state wiped
-  showScreen('lobby');   // 2 · relocate to the previous screen (the lobby)
-  if(!won){
-    // 3 · the waiting player watches the puzzle popup while the winner is
-    // checked; it closes itself on a pass (normal result follows) and turns
-    // into the refund announcement on a confirmed catch.
-    openVerifyPopup();
-    var lossNote=note||'';
-    setTimeout(function(){
-      if(verdict.voided){ openRefundResult({refund:settle.loserShare, wagered:w, score:finalScore, opp:oppLbl}); }
-      else { closeRefundResult(true); openMatchResult({won:false, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:lossNote, voided:false}); }
-    }, 2600+Math.random()*900);
-  }
-  else { openMatchResult({won:won, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:note||'', voided:verdict.voided}); } // 3 · stats popup on arrival
-  // 4 · REAL settlement: the adjudicator (your wallet) signs settle_match —
-  // the program pays 94% to the winner / 6% to the locked treasury wallet.
-  // The owed settle is recorded from the CHAIN state (joined + escrowed +
-  // unsettled), not from the wallet's current connection: if the wallet
-  // dropped mid-match, the pot is still locked on-chain and the settle is
-  // still owed — it survives the disconnect and is offered again the
-  // moment the wallet reconnects (see recoverOwedSettle). The account set
-  // is snapshotted NOW, so a settle retried later can never land on a
-  // different match. (isRealChain above still gates the anti-bot verdict
-  // adjustmen
+  var yRec={

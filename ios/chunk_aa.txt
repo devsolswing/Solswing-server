@@ -497,6 +497,11 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <p style="color:var(--muted);font-size:13px;line-height:1.5;margin:9px 2px 0;text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 16px rgba(0,0,0,.65),0 0 34px rgba(0,0,0,.4)">Best of 3 against the Swing Bot — stake SOL, watch the pump, sell before the rug. Winner takes 94% of the pot. No wallet yet? You'll get a connect prompt on the game screen — connect Phantom there to play.</p>
     </div>
     <div class="menu-tiles">
+      <button class="menu-tile" id="rewards-tile">
+        <span class="tic">🏆</span>
+        <span><span class="tt">Rewards &amp; Stats</span><span class="td">Your wagered SOL, points, level, and $SWING airdrop rewards.</span></span>
+        <span class="tgo">▸</span>
+      </button>
       <button class="menu-tile" data-goto="chat">
         <span class="tic">💬</span>
         <span><span class="tt">Chatroom</span><span class="td">The arena floor: talk swings, call rugs, gg your opponents.</span></span>
@@ -619,7 +624,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
     <div class="card">
       <h3 style="margin:0 0 4px;font-size:17px">Wallet &amp; safety</h3>
       <div class="sec-row"><span>Wallet</span><b>PHANTOM APP · BUILT-IN BROWSER ONLY</b></div>
-      <div class="sec-row"><span>Network right now</span><b>SOLANA DEVNET · PLAY MONEY, NO REAL VALUE</b></div>
-      <div class="sec-row"><span>Seed phrase</span><b class="ok">NEVER ASKED FOR · CONNECT SHARES ONLY YOUR PUBLIC ADDRESS</b></div>
-      <div class="sec-row"><span>Who decides the winner</span><b>THE GAME SERVER · TIMESTAMPS ON ARRIVAL</b></div>
-      <div class="sec-row">
+      <div class="sec-row"><span>Network right now</span><b>SOLANA DEVNET · PLAY MONEY, NO REAL VA

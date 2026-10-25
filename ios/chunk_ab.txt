@@ -1,4 +1,7 @@
-<span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
+LUE</b></div>
+      <div class="sec-row"><span>Seed phrase</span><b class="ok">NEVER ASKED FOR · CONNECT SHARES ONLY YOUR PUBLIC ADDRESS</b></div>
+      <div class="sec-row"><span>Who decides the winner</span><b>THE GAME SERVER · TIMESTAMPS ON ARRIVAL</b></div>
+      <div class="sec-row"><span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
       <div class="sec-row"><span>Funds during a match</span><b>LOCKED IN THE ON-CHAIN VAULT UNTIL SETTLEMENT</b></div>
       <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never through a link someone drops in chat.</p>
     </div>
@@ -209,6 +212,27 @@ node server.js          # http + WebSocket on :8080, solo players get SWING BOT 
       <button class="bigbtn start" id="rf-join">▶ Join Game</button>
       <button class="btn btn-disconnect" id="rf-disconnect">Disconnect Wallet</button>
     </div>
+  </div>
+</div>
+
+<!-- REWARDS & STATS MODAL — green banner header, wagered SOL, points, 9-tier levels, $SWING airdrops. -->
+<div class="modal-overlay" id="rewards-modal" role="dialog" aria-modal="true" aria-labelledby="rw-title">
+  <div class="modal-card" style="max-height:85vh;overflow-y:auto">
+    <button class="modal-x" id="rewards-modal-close" aria-label="Close rewards and stats">✕</button>
+    <div style="background:var(--green);color:#041207;border-radius:12px;padding:12px 14px;margin-bottom:12px">
+      <h3 id="rw-title" style="margin:0;font-size:18px">🏆 Rewards &amp; Stats</h3>
+      <p style="margin:6px 0 0;font-size:12.5px;line-height:1.5">Your arena record — every SOL wagered earns points toward $SWING airdrops. 0.01 SOL = 10 points.</p>
+    </div>
+    <div class="sec-row"><span>Wallet</span><b id="rw-wallet">—</b></div>
+    <div class="sec-row"><span>Total wagered</span><b id="rw-wagered">0.000 SOL</b></div>
+    <div class="sec-row"><span>Points</span><b id="rw-points">0</b></div>
+    <div class="sec-row"><span>Level</span><b id="rw-level">—</b></div>
+    <div class="sec-row"><span>Tier</span><b id="rw-tier">—</b></div>
+    <div class="sec-row"><span>Next level</span><b id="rw-next">—</b></div>
+    <div class="bar"><i id="rw-progress"></i></div>
+    <p class="wm-note" id="rw-note"></p>
+    <div id="rw-levels" style="margin-top:10px"></div>
+    <p class="wm-note">Airdrop rewards are planned and launch with $SWING — they are not claimable yet.</p>
   </div>
 </div>
 
@@ -697,36 +721,4 @@ async function refreshBalance(){
   for(var attempt=0;attempt<2;attempt++){
     try{
       var lam=await chainConn().getBalance(chain.playerKey);
-      chain.balanceLamports=lam; balanceText=fmt(lam/1e9)+' SOL · devnet';
-      return lam;
-    }catch(e){ if(attempt===0) await new Promise(function(r){ setTimeout(r,700); }); }
-  }
-  return null;
-}
-function updateFaucetNote(){
-  var el=$('faucet-note'); if(!el) return;
-  var short = realMode() && chain.balanceLamports!==null && chain.balanceLamports < (Math.round(wager()*1e9)+3000000);
-  el.classList.toggle('hidden', !short);
-}
-// initialize_match — the player's REAL escrow. Throws Error('insufficient')
-// when the wallet can't cover wager + rent/fees (faucet territory).
-async function chainStake(wagerSol){
-  var lamports=Math.round(wagerSol*1e9);
-  // Refund any previous abandoned escrow before opening a new match.
-  if(chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig && phantomProvider()){
-    try{ await chainCancel(); }catch(e){ /* previous escrow stays locked on-chain; the new stake still proceeds */ }
-  }
-  chain.matchId=newMatchId();
-  var pdas=derivePdas(chain.matchId); chain.matchState=pdas.matchState; chain.vault=pdas.vault;
-  chain.joined=false; chain.escrowSig=null; chain.joinSig=null; chain.settleSig=null; chain.cancelSig=null; chain.pendingSettle=null;
-  var bal=await chainConn().getBalance(chain.playerKey);
-  chain.balanceLamports=bal; updateFaucetNote();
-  if(bal < lamports+3000000) throw new Error('insufficient');
-  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
-  var ix=new solanaWeb3.TransactionInstruction({
-    programId:pid,
-    keys:[
-      { pubkey:chain.matchState, isSigner:false, isWritable:true },
-      { pubkey:chain.vault, isSigner:false, isWritable:true },
-      { pubkey:chain.playerKey, isSigner:true, isWritable:true },
-      { pubkey:chain.playerKey, isSigner:false, isWritable:false }, // adjudicator: your wallet (house matches
+      chain.balanceLamports=

@@ -1,4 +1,94 @@
-ts, which need a live connection to mean anything.)
+rt:(youMs!=null?youMs:null), sold:(youMs!=null), inputs:[], moves:0, pre:0};
+  if(roundTel){
+    yRec.moves=roundTel.moves;
+    for(var i=0;i<roundTel.events.length;i++){ var d=roundTel.events[i]-rugStamp; if(d<0) yRec.pre++; else yRec.inputs.push(d); }
+    roundTel=null;
+  }
+  if(yRec.sold&&yRec.inputs.length===0) yRec.inputs.push(yRec.rt);
+  telMatch.you.push(yRec);
+  var oSold=(who==='bot');
+  var oRec={rt:(oSold?botMs:null), sold:oSold, inputs:[], moves:0, pre:0};
+  if(oSold){ oRec.inputs.push(botMs); oRec.moves=oppSnap?0:Math.round(12+Math.random()*48); }
+  telMatch.opp.push(oRec);
+}
+function reviewWinner(side){
+  var all=telMatch[side]||[], recs=[], i;
+  for(i=0;i<all.length;i++){ if(all[i].sold&&all[i].rt!=null) recs.push(all[i]); }
+  var out={voided:false, score:0};
+  if(recs.length<2) return out;
+  var rts=recs.map(function(r){ return r.rt; });
+  var mean=0, mv=0, k;
+  for(k=0;k<rts.length;k++) mean+=rts[k];
+  mean/=rts.length;
+  var varSum=0; for(k=0;k<rts.length;k++) varSum+=(rts[k]-mean)*(rts[k]-mean);
+  var sd=Math.sqrt(varSum/rts.length), cv=mean>0?sd/mean:1;
+  var mx=Math.max.apply(null,rts), mn=Math.min.apply(null,rts);
+  for(k=0;k<recs.length;k++) mv+=recs[k].moves;
+  mv/=recs.length;
+  var fast=(mean<100&&mx<130), steady=(cv<0.08&&(mx-mn)<25), still=(mv<2);
+  out.score=(fast?45:0)+(steady?30:0)+(still?25:0);
+  out.voided=(fast&&steady&&still);
+  return out;
+}
+function endMatch(won, note){
+  var w=(matchWager!==null?matchWager:wager()); // this match's stake per player
+  var pot=w*2;
+  var finalScore=wins+' – '+losses; // captured BEFORE the session state is wiped
+  var oppLbl=oppShort; // likewise captured before the wipe
+  // Settlement shape mirrors the adjudicator's settle call: one share per
+  // side — winner side, loser side, house side — always summing to the pot.
+  var verdict=reviewWinner(won?'you':'opp');
+  var settle={winner:(won?'you':'opp'), voided:verdict.voided, score:verdict.score,
+    winnerShare:pot*0.94, loserShare:0, houseShare:pot*0.06};
+  if(verdict.voided){ settle.winnerShare=0; settle.loserShare=pot*0.5; settle.houseShare=pot*0.5; }
+  var payout=won? settle.winnerShare : settle.loserShare; // what lands back in YOUR wallet
+  var pnl=payout-w;
+  if(matchMode==='bot'){ // house ledger: every bot match moves the give-back curve (forfeits count as losses, but not as played matches)
+    var led=loadBotLedger(); led.wagered+=w; led.won+=payout; if(note!=='Forfeited') led.matches++; led.lastWager=w; saveBotLedger(led);
+    recordWager(w); // rewards: every staked SOL counts toward points + levels
+  }
+  // REAL on-chain matches: the anti-bot review stays STAGED (it never moves
+  // money) — settle_match only knows winner 1 or 2, so a flagged result
+  // settles the pot to the NON-flagged side, 94/6 like any other match.
+  var isRealChain=realMode() && chain.joined && !!chain.escrowSig;
+  if(isRealChain && verdict.voided){
+    var flaggedYou=won; // the review inspected the winner — that's who got flagged
+    settle.winner=flaggedYou?'opp':'you'; settle.winnerShare=pot*0.94; settle.loserShare=0; settle.houseShare=pot*0.06;
+    payout=flaggedYou?0:pot*0.94; pnl=payout-w; verdict.voided=false; verdict.chainVoid=true;
+  }
+  recordMatch(won&&!verdict.voided&&!verdict.chainVoid, payout); // a flagged "win" the review overturned never counts as a won match in the stats
+  if(verdict.voided){
+    log('[server] match_end outcome=void · settle_match → adjudicator · winner share 0.000 SOL · loser refunded '+fmt(settle.loserShare)+' SOL', won?'ruglog':'winlog');
+    log(treasuryLockOk()?'[chain] house share '+fmt(settle.houseShare)+' SOL → treasury wallet · LOCKED ✓ (the one locked fee receiver)':'[chain] ⛔ TREASURY LOCK CHECK FAILED — settlement refused','winlog');
+  }
+  else if(won){ level++; log('[server] match_end outcome=win payout='+fmt(payout)+' SOL · settle_match → adjudicator','winlog'); log(treasuryLockOk()?'[chain] fee '+fmt(settle.houseShare)+' SOL (6%) → treasury wallet · LOCKED ✓ (the one locked fee receiver)':'[chain] ⛔ TREASURY LOCK CHECK FAILED — settlement refused','winlog'); }
+  else { if(level>1) level--; log('[server] match_end outcome=loss','ruglog'); }
+  $('rank').textContent='Level '+level+' · '+((won&&!verdict.voided)?'CHAD':'JEET');
+  if(walletDemo){ demoBalance=Math.max(0, demoBalance+pnl); balanceText=fmt(demoBalance)+' SOL · demo'; }
+  disconnectSession();   // 1 · disconnect immediately — session gone, state wiped
+  showScreen('lobby');   // 2 · relocate to the previous screen (the lobby)
+  if(!won){
+    // 3 · the waiting player watches the puzzle popup while the winner is
+    // checked; it closes itself on a pass (normal result follows) and turns
+    // into the refund announcement on a confirmed catch.
+    openVerifyPopup();
+    var lossNote=note||'';
+    setTimeout(function(){
+      if(verdict.voided){ openRefundResult({refund:settle.loserShare, wagered:w, score:finalScore, opp:oppLbl}); }
+      else { closeRefundResult(true); openMatchResult({won:false, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:lossNote, voided:false}); }
+    }, 2600+Math.random()*900);
+  }
+  else { openMatchResult({won:won, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:note||'', voided:verdict.voided}); } // 3 · stats popup on arrival
+  // 4 · REAL settlement: the adjudicator (your wallet) signs settle_match —
+  // the program pays 94% to the winner / 6% to the locked treasury wallet.
+  // The owed settle is recorded from the CHAIN state (joined + escrowed +
+  // unsettled), not from the wallet's current connection: if the wallet
+  // dropped mid-match, the pot is still locked on-chain and the settle is
+  // still owed — it survives the disconnect and is offered again the
+  // moment the wallet reconnects (see recoverOwedSettle). The account set
+  // is snapshotted NOW, so a settle retried later can never land on a
+  // different match. (isRealChain above still gates the anti-bot verdict
+  // adjustments, which need a live connection to mean anything.)
   var settleOwed=chain.joined && !!chain.escrowSig && !chain.settleSig;
   if(settleOwed){
     // summary rides along so a settle retried later rebuilds this exact
