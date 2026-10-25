@@ -1,4 +1,12 @@
-n:won, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:note||'', voided:false, mode:matchMode } };
+ts, which need a live connection to mean anything.)
+  var settleOwed=chain.joined && !!chain.escrowSig && !chain.settleSig;
+  if(settleOwed){
+    // summary rides along so a settle retried later rebuilds this exact
+    // result popup.
+    var winKey=(settle.winner==='you') ? chain.playerKey : (chain.botKey&&chain.botKey.publicKey);
+    chain.pendingSettle={ winnerId:(settle.winner==='you'?1:2),
+      accounts:{ matchState:chain.matchState?chain.matchState.toString():null, vault:chain.vault?chain.vault.toString():null, winnerKey:winKey?winKey.toString():null },
+      summary:{ won:won, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:note||'', voided:false, mode:matchMode } };
     if(realMode()) chainDoSettle();
     else log('[chain] settle_match still owed — reconnect the wallet to sign it and release the pot','ruglog');
   }

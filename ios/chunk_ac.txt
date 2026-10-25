@@ -138,9 +138,16 @@ function setStatus(t){ $('status').textContent=t; }
 // whole again, then the normal casino edge.
 function loadBotLedger(){ try{ var l=JSON.parse(localStorage.getItem('solswing_bot_ledger')||'null'); if(l && typeof l.wagered==='number' && typeof l.won==='number' && typeof l.matches==='number') return l; }catch(e){} return {wagered:0, won:0, matches:0}; }
 function saveBotLedger(l){ try{ localStorage.setItem('solswing_bot_ledger', JSON.stringify(l)); }catch(e){} }
-function botPhaseFor(l){ l=l||loadBotLedger(); if(l.matches<3) return 'unbeatable'; if(l.won < l.wagered - 1e-9) return 'giveback'; return 'normal'; }
+function botPhaseFor(l, w){ l=l||loadBotLedger(); if(l.matches<3) return 'unbeatable'; var raised=(l.lastWager!==null && l.lastWager!==undefined && w > l.lastWager + 1e-9); if(!raised && l.won < l.wagered - 1e-9) return 'giveback'; return 'scaled'; }
+// Wager-scaled house odds: the player's chance SHRINKS as the wager grows.
+// 0.01 SOL is the kindest (still tricky — the house wins ~6 in 10 vs an
+// average player); at 1 SOL the bot is near-unbeatable for anyone but elite
+// reflexes. Higher wager, lower odds, always.
+function botScaledParams(w){
+  var x=Math.min(Math.max(w||0.01, 0.01), 1);
+  return { low:Math.round(220 - 70*x), high:Math.round(450 - 130*x), snap:0.10 + 0.20*x };
+}
 var botPhase='normal';
-function botRange(){ return [200,450]; } // house edge: faster base than the average phone player, plus snap rounds (below)
 
 function clearTimers(){ [tickTimer,rugTimer,botTimer,resolveTimer].forEach(function(x){ if(x){clearInterval(x); clearTimeout(x);} }); tickTimer=rugTimer=botTimer=resolveTimer=null; }
 
@@ -148,7 +155,7 @@ function startRound(){
   clearTimers(); if(matchEndTimer){ clearTimeout(matchEndTimer); matchEndTimer=null; } // a new match cancels the post-match lobby trip
   wins>=2||losses>=2 ? (wins=0,losses=0,dots()) : null;
   lockWager(true); // the stake is committed from here to match end — the selector cannot move under a live match
-  if(wins===0&&losses===0&&matchWager===null){ matchWager=(matchMode==='pvp'&&mmWager!==null)?mmWager:wager(); statsWagered+=matchWager; telMatch={you:[],opp:[]}; if(matchMode==='bot'){ var led0=loadBotLedger(); botPhase=botPhaseFor(led0); log('[bot] phase '+botPhase+' · lifetime wagered '+fmt(led0.wagered)+' SOL · won '+fmt(led0.won)+' SOL · bot matches '+led0.matches); } } // PvP plays for the LOCKED mmWager, never whatever the selector happens to show now
+  if(wins===0&&losses===0&&matchWager===null){ matchWager=(matchMode==='pvp'&&mmWager!==null)?mmWager:wager(); statsWagered+=matchWager; telMatch={you:[],opp:[]}; if(matchMode==='bot'){ var led0=loadBotLedger(); botPhase=botPhaseFor(led0, matchWager); log('[bot] phase '+botPhase+' at '+fmt(matchWager)+' SOL · lifetime wagered '+fmt(led0.wagered)+' SOL · won '+fmt(led0.won)+' SOL · bot matches '+led0.matches+' · last wager '+fmt(led0.lastWager||0)+' SOL'); } } // PvP plays for the LOCKED mmWager, never whatever the selector happens to show now
   active=true; rugged=false; youMs=null; botMs=null; roundTel={events:[], moves:0};
   $('btn-start').classList.add('hidden'); var sell=$('btn-sell'); sell.classList.remove('hidden'); sell.disabled=true;
   $('rug').classList.remove('active'); $('bars').innerHTML='';
@@ -179,10 +186,10 @@ function doRug(){
   // Meter is NOT reset: it freezes at its random position — no ending position.
   $('rug').classList.add('active'); $('btn-sell').disabled=false; setStatus('SMASH SELL NOW!');
   log('[server] RUG broadcast · serverTime='+rugStamp,'ruglog');
-  var r=botRange(), lat;
+  var lat;
   if(botPhase==='unbeatable'){ oppSnap=true; oppSnapMs=26+Math.random()*14; lat=oppSnapMs+(Math.random()*3-1.5); } // unbeatable: snap every round
   else if(botPhase==='giveback'){ oppSnap=false; lat=800+Math.random()*400; } // give-back: slow, so the player wins it back
-  else { lat=(oppSnap=(Math.random()<0.20)) ? (oppSnapMs=26+Math.random()*14)+(Math.random()*3-1.5) : r[0]+Math.random()*(r[1]-r[0]); } // normal casino edge
+  else { var sp=botScaledParams(matchWager!==null?matchWager:wager()); lat=(oppSnap=(Math.random()<sp.snap)) ? (oppSnapMs=26+Math.random()*14)+(Math.random()*3-1.5) : sp.low+Math.random()*(sp.high-sp.low); } // wager-scaled house odds
   botMs=Math.round(lat);
   botTimer=setTimeout(function(){ if(active&&rugged) finishRound('bot'); }, lat);
   resolveTimer=setTimeout(function(){ if(active&&rugged) finishRound(youMs!=null?'you':'bot'); },5000);
@@ -770,7 +777,7 @@ function endMatch(won, note){
   var payout=won? settle.winnerShare : settle.loserShare; // what lands back in YOUR wallet
   var pnl=payout-w;
   if(matchMode==='bot'){ // house ledger: every bot match moves the give-back curve (forfeits count as losses, but not as played matches)
-    var led=loadBotLedger(); led.wagered+=w; led.won+=payout; if(note!=='Forfeited') led.matches++; saveBotLedger(led);
+    var led=loadBotLedger(); led.wagered+=w; led.won+=payout; if(note!=='Forfeited') led.matches++; led.lastWager=w; saveBotLedger(led);
   }
   // REAL on-chain matches: the anti-bot review stays STAGED (it never moves
   // money) — settle_match only knows winner 1 or 2, so a flagged result
@@ -813,12 +820,4 @@ function endMatch(won, note){
   // moment the wallet reconnects (see recoverOwedSettle). The account set
   // is snapshotted NOW, so a settle retried later can never land on a
   // different match. (isRealChain above still gates the anti-bot verdict
-  // adjustments, which need a live connection to mean anything.)
-  var settleOwed=chain.joined && !!chain.escrowSig && !chain.settleSig;
-  if(settleOwed){
-    // summary rides along so a settle retried later rebuilds this exact
-    // result popup.
-    var winKey=(settle.winner==='you') ? chain.playerKey : (chain.botKey&&chain.botKey.publicKey);
-    chain.pendingSettle={ winnerId:(settle.winner==='you'?1:2),
-      accounts:{ matchState:chain.matchState?chain.matchState.toString():null, vault:chain.vault?chain.vault.toString():null, winnerKey:winKey?winKey.toString():null },
-      summary:{ wo
+  // adjustmen
