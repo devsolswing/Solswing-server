@@ -1,13 +1,4 @@
-e Phantom's browser the game shows an “Open in Phantom” prompt instead. Inside Phantom, Connect Wallet and every stake, settlement and refund signature happen natively in place: no app switching, no redirects. On mobile you tap SELL instead of pressing Space, and all five pages stack into a single thumb-friendly column.</p></details>
-  <!-- HOW IT WORKS -->
-  <div class="section">
-    <h2>Game-server based, not browser-trusted</h2>
-    <p class="lead">The original version decided everything in the browser — anyone could edit the rug time or fake a win. SolSwing flips that: the server is the referee, the Solana program is the vault.</p>
-    <div class="flow">
-      <div class="flow-step"><i>STEP 1 · ESCROW</i><h3>Both players stake</h3><p><span class="mono">initialize_match</span> (P1) + <span class="mono">join_match</span> (P2) lock equal wagers into a PDA vault. Two-phase, so nobody has to co-sign someone else's transaction.</p></div>
-      <div class="flow-step"><i>STEP 2 · SERVER ROUND</i><h3>Server picks the rug</h3><p>The Node server picks a secret rug moment, streams <span class="mono">tick</span> messages to both clients, then broadcasts <span class="mono">rug</span>. Clients learn it at the same instant the server stamps it.</p></div>
-      <div class="flow-step"><i>STEP 3 · REFLEX RACE</i><h3>Fastest sell wins</h3><p>Server timestamps sell messages on arrival — client timestamps are ignored. Late sells (&gt;5s), double sells, disconnects and hidden-tab forfeits are all handled server-side.</p></div>
-      <div class="flow-step"><i>STEP 4 · SETTLE ON-CHAIN</i><h3>Adjudicator pays out</h3><p>Only the adjudicator (game server key) can call <span class="mono">settle_match</span>. The program checks the winner, then pays 94% to the winner and 6% to the treasury with checked math.</p></div>
+lass="flow-step"><i>STEP 4 · SETTLE ON-CHAIN</i><h3>Adjudicator pays out</h3><p>Only the adjudicator (game server key) can call <span class="mono">settle_match</span>. The program checks the winner, then pays 94% to the winner and 6% to the treasury with checked math.</p></div>
     </div>
   </div>
 
@@ -236,8 +227,14 @@ node server.js          # http + WebSocket on :8080, solo players get SWING BOT 
     <div class="sec-row"><span>Record</span><b id="lb-record">0W – 0L</b></div>
     <div class="sec-row"><span>P&amp;L</span><b id="lb-pnl">0.000 SOL</b></div>
     <div class="sec-row"><span>Fastest reflex</span><b id="lb-reflex">—</b></div>
+    <button class="bigbtn" id="lb-publish" style="width:100%;margin-top:10px">📤 Publish my bot stats to the board</button>
+    <p class="wm-note" id="lb-publish-note">PvP is automatic (the server records it). Bot stats publish when you tap this — one Phantom signature proves the numbers are yours. No signature, no bot points on the board.</p>
+    <div style="margin-top:14px;font-weight:700">Global board — ranked by points</div>
+    <div id="lb-board" style="margin-top:6px"></div>
+    <p class="wm-note" id="lb-board-note">Loading the live board…</p>
+    <div style="margin-top:14px;font-weight:700">Your level ladder — % completed</div>
     <div id="lb-levels" style="margin-top:10px"></div>
-    <p class="wm-note">Your card only for now — a global ranking of every player needs server records, coming later.</p>
+    <p class="wm-note">Board resets if the server redeploys — a database makes it permanent, coming later. The board starts fresh: past matches weren't recorded, but tapping Publish puts your on-device bot history on it.</p>
   </div>
 </div>
 
@@ -851,4 +848,40 @@ function setMmSettle(html){ var el=$('mm-settle'); if(el) el.innerHTML=html; }
 // pays 94% to the winner and 6% to the locked treasury. Retry by tapping
 // the Settlement row in the match popup if the signature was declined.
 async function chainDoSettle(){
-  var ps=chain.pendingSettle; if(!ps || chain.settleSig || chain.settleBusy) 
+  var ps=chain.pendingSettle; if(!ps || chain.settleSig || chain.settleBusy) return;
+  if(!realMode()){ setMmSettle('⚠ Connect your wallet to sign the settlement — the pot stays locked on-chain until you do.'); return; }
+  if(!treasuryLockOk()){ setMmSettle('⛔ Treasury lock check failed — settlement refused.'); return; }
+  chain.settleBusy=true;
+  setMmSettle('⏳ Settling on-chain — approve in Phantom…');
+  try{
+    var sig=await phantomSend([buildSettleIx(ps.winnerId, ps.accounts)]);
+    chain.settleSig=sig; chain.lastTx=sig; chain.pendingSettle=null;
+    setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(sig)+'" target="_blank" rel="noopener">tx '+shortSig(sig)+' ↗</a>');
+    log('[chain] settle_match confirmed · winner paid 94% · treasury fee 6% · tx '+shortSig(sig),'winlog');
+    refreshBalance().then(updateFaucetNote);
+  }catch(e){
+    setMmSettle('⚠ Settlement not signed — tap here to retry.');
+    log('[chain] settle_match not completed · the pot stays locked in the vault until settled','ruglog');
+  }
+  chain.settleBusy=false;
+}
+var wins=0, losses=0, level=1, roundNo=1;
+var active=false, rugged=false, tickTimer=null, rugTimer=null, botTimer=null, resolveTimer=null;
+var startAt=0, rugAt=0, rugStamp=0, youMs=null, botMs=null;
+var matchBestMs=null; // fastest reflex this match (bot mode) — merged into the stats record at match end
+var matchEndTimer=null; // legacy post-match handle — match end is now instant (disconnectSession), this stays cleared
+var telMatch={you:[],opp:[]}, roundTel=null, oppSnap=false, oppSnapMs=30; // per-round input timing records + opponent pace profile
+
+function wager(){ return Math.max(0.01, parseFloat($('wager').value)||0.1); }
+// The wager selector locks the moment a stake flow begins (pre-game or
+// matchmaking countdown, queue, signing) and stays locked until the match
+// ends or the flow aborts — the amount being played for can never change
+// mid-flight, so the pot lines and the payout math always match the stake
+// that was actually signed.
+function lockWager(lock){ var s=$('wager'); if(s) s.disabled=!!lock; }
+function fmt(n,d){ return n.toFixed(d==null?3:d); }
+function updatePot(){
+  var w=wager(), pot=w*2;
+  $('pot-line').textContent=fmt(pot)+' SOL'; $('win-line').textContent=fmt(pot*0.94)+' SOL'; $('fee-line').textContent=fmt(pot*0.06)+' SOL';
+  updateHUD();
+  if(typeof updateFaucetNote==='function') updateFaucetNot

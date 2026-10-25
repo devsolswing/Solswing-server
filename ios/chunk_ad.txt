@@ -1,4 +1,31 @@
-l(mmTimer); mmTimer=null; }
+untdown
+    if(mmOppDropAt && Date.now()>=mmOppDropAt){ opponentDropped(); return; }
+    var remain=Math.ceil((mmDeadline-Date.now())/1000);
+    if(remain<=0){ // zero → round 1 begins automatically
+      mmActive=false; if(mmTimer){ clearInterval(mmTimer); mmTimer=null; }
+      ov.classList.remove('open'); // wager stays locked — startRound owns it now, disconnectSession frees it at match end
+      if(realMode() && !chain.joined){ // lock the opponent's stake on-chain (join_match) before round 1
+        setStatus('🔒 Locking the opponent stake on-chain…');
+        chainBotJoin(mmWager).then(function(){
+          log('[matchmaking] countdown complete · round 1 starting · pot '+fmt(mmWager*2)+' SOL locked on-chain');
+          startRound();
+        }).catch(function(){
+          setStatus('⚠ Opponent stake failed on-chain — refunding your wager…');
+          chainCancel().catch(function(){}).then(function(){ lockWager(false); showScreen('lobby'); });
+        });
+        return;
+      }
+      log('[matchmaking] countdown complete · round 1 starting · pot '+fmt(mmWager*2)+' SOL');
+      startRound(); return;
+    }
+    if(numEl.textContent!==String(remain)){ numEl.textContent=remain; numEl.classList.remove('pop'); void numEl.offsetWidth; numEl.classList.add('pop'); }
+  }
+  tick();
+  mmTimer=setInterval(tick,200);
+}
+function opponentDropped(){
+  if(!mmActive) return;
+  mmActive=false; if(mmTimer){ clearInterval(mmTimer); mmTimer=null; }
   if(realMode() && chain.escrowSig && !chain.joined){ chainCancel().catch(function(){}); } // match never filled on-chain → real refund via cancel_match
   log('[matchmaking] opponent disconnected during countdown · match cancelled · wager refunded','ruglog');
   $('mm-label').textContent='✕ MATCH CANCELLED';
@@ -131,6 +158,7 @@ function endMatch(won, note){
     var led=loadBotLedger(); led.wagered+=w; led.won+=payout; if(note!=='Forfeited') led.matches++; led.lastWager=w; saveBotLedger(led);
     recordWager(w); // rewards: every staked SOL counts toward points + levels
     recordMatchResult(won, payout, matchBestMs); // leaderboard: W/L, P&L, fastest reflex
+    recordBotStats(w, won, payout, matchBestMs); // bot-only record, published (signed) to the global board
   }
   // REAL on-chain matches: the anti-bot review stays STAGED (it never moves
   // money) — settle_match only knows winner 1 or 2, so a flagged result

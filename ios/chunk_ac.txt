@@ -1,40 +1,4 @@
-return;
-  if(!realMode()){ setMmSettle('⚠ Connect your wallet to sign the settlement — the pot stays locked on-chain until you do.'); return; }
-  if(!treasuryLockOk()){ setMmSettle('⛔ Treasury lock check failed — settlement refused.'); return; }
-  chain.settleBusy=true;
-  setMmSettle('⏳ Settling on-chain — approve in Phantom…');
-  try{
-    var sig=await phantomSend([buildSettleIx(ps.winnerId, ps.accounts)]);
-    chain.settleSig=sig; chain.lastTx=sig; chain.pendingSettle=null;
-    setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(sig)+'" target="_blank" rel="noopener">tx '+shortSig(sig)+' ↗</a>');
-    log('[chain] settle_match confirmed · winner paid 94% · treasury fee 6% · tx '+shortSig(sig),'winlog');
-    refreshBalance().then(updateFaucetNote);
-  }catch(e){
-    setMmSettle('⚠ Settlement not signed — tap here to retry.');
-    log('[chain] settle_match not completed · the pot stays locked in the vault until settled','ruglog');
-  }
-  chain.settleBusy=false;
-}
-var wins=0, losses=0, level=1, roundNo=1;
-var active=false, rugged=false, tickTimer=null, rugTimer=null, botTimer=null, resolveTimer=null;
-var startAt=0, rugAt=0, rugStamp=0, youMs=null, botMs=null;
-var matchBestMs=null; // fastest reflex this match (bot mode) — merged into the stats record at match end
-var matchEndTimer=null; // legacy post-match handle — match end is now instant (disconnectSession), this stays cleared
-var telMatch={you:[],opp:[]}, roundTel=null, oppSnap=false, oppSnapMs=30; // per-round input timing records + opponent pace profile
-
-function wager(){ return Math.max(0.01, parseFloat($('wager').value)||0.1); }
-// The wager selector locks the moment a stake flow begins (pre-game or
-// matchmaking countdown, queue, signing) and stays locked until the match
-// ends or the flow aborts — the amount being played for can never change
-// mid-flight, so the pot lines and the payout math always match the stake
-// that was actually signed.
-function lockWager(lock){ var s=$('wager'); if(s) s.disabled=!!lock; }
-function fmt(n,d){ return n.toFixed(d==null?3:d); }
-function updatePot(){
-  var w=wager(), pot=w*2;
-  $('pot-line').textContent=fmt(pot)+' SOL'; $('win-line').textContent=fmt(pot*0.94)+' SOL'; $('fee-line').textContent=fmt(pot*0.06)+' SOL';
-  updateHUD();
-  if(typeof updateFaucetNote==='function') updateFaucetNote();
+e();
 }
 $('wager').addEventListener('input',updatePot); $('wager').addEventListener('change',updatePot); updatePot();
 
@@ -91,6 +55,23 @@ function recordMatchResult(won, payout, bestMs){
   if(bestMs!=null && (r.bestMs==null || bestMs<r.bestMs)) r.bestMs=bestMs;
   saveRewards(r);
 }
+// Bot-only per-wallet record — this is what gets published (signed) to the
+// global board. Kept separate from the combined record so PvP (recorded
+// server-side) is never double-counted.
+function botStatsKey(){
+  try{ if(chain && chain.playerKey) return 'solswing_bot_stats_'+chain.playerKey.toBase58(); }catch(e){}
+  return 'solswing_bot_stats_local';
+}
+function loadBotStats(){ try{ var r=JSON.parse(localStorage.getItem(botStatsKey())||'null'); if(r && typeof r.wagered==='number'){ r.wagered=r.wagered||0; r.wins=r.wins||0; r.losses=r.losses||0; r.won=r.won||0; if(r.bestMs===undefined) r.bestMs=null; return r; } }catch(e){} return {wagered:0, wins:0, losses:0, won:0, bestMs:null}; }
+function saveBotStats(r){ try{ localStorage.setItem(botStatsKey(), JSON.stringify(r)); }catch(e){} }
+function recordBotStats(w, won, payout, bestMs){
+  var r=loadBotStats();
+  r.wagered=(r.wagered||0)+w;
+  if(won) r.wins++; else r.losses++;
+  r.won=(r.won||0)+(payout||0);
+  if(bestMs!=null && (r.bestMs==null || bestMs<r.bestMs)) r.bestMs=bestMs;
+  saveBotStats(r);
+}
 function rwState(){
   var r=loadRewards(); var wagered=r.wagered||0; var pts=Math.floor(wagered*1000);
   var level=0; for(var i=0;i<RW_LEVELS.length;i++){ if(pts>=RW_LEVELS[i].pts) level=RW_LEVELS[i].level; }
@@ -137,7 +118,61 @@ function closeRewards(){ $('rewards-modal').classList.remove('open'); }
 $('rewards-tile').addEventListener('click', openRewards);
 $('rewards-modal-close').addEventListener('click', closeRewards);
 $('rewards-modal').addEventListener('click', function(e){ if(e.target===this) closeRewards(); });
-// ---------- LEADERBOARDS — your standing, read fresh every time it opens ----------
+// ---------- LEADERBOARDS — global board (server) + your local card + level ladder ----------
+var LB_HTTP='https://solswing-server-production.up.railway.app';
+function lbHex(bytes){ return Array.from(bytes).map(function(b){ return b.toString(16).padStart(2,'0'); }).join(''); }
+function lbShort(w){ return w.slice(0,4)+'…'+w.slice(-4); }
+function loadLeaderboardBoard(){
+  var wallet=null;
+  try{ if(chain && chain.playerKey) wallet=chain.playerKey.toBase58(); }catch(e){}
+  var url=LB_HTTP+'/leaderboard'+(wallet ? '?wallet='+encodeURIComponent(wallet) : '');
+  fetch(url).then(function(r){ return r.json(); }).then(function(j){
+    var board=(j && j.board) || [];
+    var note=$('lb-board-note');
+    if(board.length===0){
+      $('lb-board').innerHTML='';
+      note.textContent='No players on the board yet — be the first. Play a match, then publish your bot stats.';
+      return;
+    }
+    var rows='';
+    board.forEach(function(r){
+      var mine=wallet && r.wallet===wallet;
+      rows+='<div style="display:flex;justify-content:space-between;gap:8px;padding:7px 10px;border-radius:8px;margin:3px 0;background:'+(mine?'rgba(34,197,94,.25)':'rgba(255,255,255,.04)')+';border:1px solid '+(mine?'var(--green)':'var(--line)')+'"><span>#'+r.rank+' '+lbShort(r.wallet)+(mine?' (you)':'')+'</span><span>'+r.points.toLocaleString()+' pts · L'+r.level+' · '+r.wins+'W–'+r.losses+'L</span></div>';
+    });
+    if(j.yourRank!=null && !board.some(function(r){ return r.wallet===wallet; }) && j.yourEntry){
+      var y=j.yourEntry;
+      rows+='<div style="display:flex;justify-content:space-between;gap:8px;padding:7px 10px;border-radius:8px;margin:8px 0 3px;background:rgba(34,197,94,.25);border:1px solid var(--green)"><span>#'+j.yourRank+' '+lbShort(y.wallet)+' (you)</span><span>'+y.points.toLocaleString()+' pts · L'+y.level+' · '+y.wins+'W–'+y.losses+'L</span></div>';
+    }
+    $('lb-board').innerHTML=rows;
+    note.textContent=board.length+' player'+(board.length===1?'':'s')+' on the board'+(j.yourRank!=null ? ' · your rank: #'+j.yourRank : ' · connect a wallet to see your rank')+'.';
+  }).catch(function(){
+    $('lb-board').innerHTML='';
+    $('lb-board-note').textContent='Couldn\'t reach the live board — showing your local stats only. Check your connection and reopen.';
+  });
+}
+async function publishBotStats(){
+  if(!chain || !chain.playerKey){ $('lb-publish-note').textContent='Connect a wallet first — the board is keyed by wallet.'; return; }
+  var wallet=chain.playerKey.toBase58();
+  var b=loadBotStats();
+  // Strings are built FIRST and signed verbatim — the server rebuilds the
+  // same message from these exact strings, so the signature always matches.
+  var wageredStr=(Math.round(b.wagered*1e9)/1e9).toString();
+  var wonStr=(Math.round(b.won*1e9)/1e9).toString();
+  var winsStr=String(b.wins), lossesStr=String(b.losses);
+  var bestStr=b.bestMs==null ? '' : String(b.bestMs);
+  var msg='SolSwing leaderboard: '+wallet+' wagered='+wageredStr+' wins='+winsStr+' losses='+lossesStr+' won='+wonStr+' bestMs='+bestStr;
+  try{
+    $('lb-publish-note').textContent='Waiting for Phantom — approve the publish signature…';
+    var res=await walletAdapter.signMessage(new TextEncoder().encode(msg));
+    var r=await fetch(LB_HTTP+'/leaderboard/report', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({wallet:wallet, wagered:wageredStr, wins:winsStr, losses:lossesStr, won:wonStr, bestMs:bestStr, signature:lbHex(res.signature)})});
+    var j=await r.json();
+    if(j && j.ok){ $('lb-publish-note').textContent='Published ✓ — your bot stats are now on the board.'; loadLeaderboardBoard(); }
+    else $('lb-publish-note').textContent='Publish didn\'t check out — try again.';
+  }catch(e){
+    if(e && e.code===4001) $('lb-publish-note').textContent='Signature declined in Phantom — nothing was published.';
+    else $('lb-publish-note').textContent='Couldn\'t reach the board server — try again.';
+  }
+}
 function openLeaderboard(){
   var s=rwState();
   var wallet='Not connected';
@@ -151,6 +186,9 @@ function openLeaderboard(){
   pnlEl.textContent=(s.pnl>0?'+':'')+fmt(s.pnl)+' SOL';
   pnlEl.style.color=s.pnl>0 ? 'var(--green)' : (s.pnl<0 ? '#f87171' : '');
   $('lb-reflex').textContent=s.bestMs!=null ? (s.bestMs+'ms') : '— (no sells yet)';
+  $('lb-publish-note').textContent='PvP is automatic (the server records it). Bot stats publish when you tap this — one Phantom signature proves the numbers are yours. No signature, no bot points on the board.';
+  $('lb-board-note').textContent='Loading the live board…';
+  $('lb-board').innerHTML='';
   var rows='';
   for(var i=0;i<RW_LEVELS.length;i++){
     var L=RW_LEVELS[i];
@@ -161,11 +199,13 @@ function openLeaderboard(){
   }
   $('lb-levels').innerHTML=rows;
   $('leaderboard-modal').classList.add('open');
+  loadLeaderboardBoard();
 }
 function closeLeaderboard(){ $('leaderboard-modal').classList.remove('open'); }
 $('leaderboard-tile').addEventListener('click', openLeaderboard);
 $('leaderboard-modal-close').addEventListener('click', closeLeaderboard);
 $('leaderboard-modal').addEventListener('click', function(e){ if(e.target===this) closeLeaderboard(); });
+$('lb-publish').addEventListener('click', publishBotStats);
 // ---------- PIN LOCK — opt-in 4-digit sign-in per wallet ----------
 // The PIN is a device-local lock, NOT the money's security: only the
 // Phantom wallet signature moves SOL. The PIN stops someone who grabs an
@@ -861,31 +901,4 @@ function showMmCountdown(){
   var numEl=$('mm-num'); numEl.style.color='';
   function tick(){
     if(!mmActive) return;
-    if(!$('screen-game').classList.contains('active')||!walletConnected){ cleanupMatchmaking(); $('btn-start').classList.remove('hidden'); log('[matchmaking] countdown cancelled — player left · wager refunded','ruglog'); return; } // you disconnected mid-countdown
-    if(mmOppDropAt && Date.now()>=mmOppDropAt){ opponentDropped(); return; }
-    var remain=Math.ceil((mmDeadline-Date.now())/1000);
-    if(remain<=0){ // zero → round 1 begins automatically
-      mmActive=false; if(mmTimer){ clearInterval(mmTimer); mmTimer=null; }
-      ov.classList.remove('open'); // wager stays locked — startRound owns it now, disconnectSession frees it at match end
-      if(realMode() && !chain.joined){ // lock the opponent's stake on-chain (join_match) before round 1
-        setStatus('🔒 Locking the opponent stake on-chain…');
-        chainBotJoin(mmWager).then(function(){
-          log('[matchmaking] countdown complete · round 1 starting · pot '+fmt(mmWager*2)+' SOL locked on-chain');
-          startRound();
-        }).catch(function(){
-          setStatus('⚠ Opponent stake failed on-chain — refunding your wager…');
-          chainCancel().catch(function(){}).then(function(){ lockWager(false); showScreen('lobby'); });
-        });
-        return;
-      }
-      log('[matchmaking] countdown complete · round 1 starting · pot '+fmt(mmWager*2)+' SOL');
-      startRound(); return;
-    }
-    if(numEl.textContent!==String(remain)){ numEl.textContent=remain; numEl.classList.remove('pop'); void numEl.offsetWidth; numEl.classList.add('pop'); }
-  }
-  tick();
-  mmTimer=setInterval(tick,200);
-}
-function opponentDropped(){
-  if(!mmActive) return;
-  mmActive=false; if(mmTimer){ clearInterva
+    if(!$('screen-game').classList.contains('active')||!walletConnected){ cleanupMatchmaking(); $('btn-start').classList.remove('hidden'); log('[matchmaking] countdown cancelled — player left · wager refunded','ruglog'); return; } // you disconnected mid-co

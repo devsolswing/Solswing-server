@@ -281,6 +281,9 @@ function resolveRound(match, reason) {
     clearTimeout(round.botTimer);
 
     const times = round.sells.map(s => (s === null ? Infinity : s));
+    // Leaderboard reflex: fastest sell per player this match (for the PvP board record).
+    match.bestMs = match.bestMs || [null, null];
+    times.forEach((t, i) => { if (isFinite(t)) { const ms = Math.round(t); if (match.bestMs[i] == null || ms < match.bestMs[i]) match.bestMs[i] = ms; } });
     let winnerIndex;
     if (!isFinite(times[0]) && !isFinite(times[1])) {
         winnerIndex = Math.random() < 0.5 ? 0 : 1; // nobody sold: coin flip
@@ -317,6 +320,17 @@ async function endMatch(match, winnerIndex) {
     match.state = 'ended';
     const winner = match.players[winnerIndex];
     const payout = match.pot * 0.94;
+
+    // ---- Global leaderboard: PvP is recorded server-side (authoritative) ----
+    match.players.forEach((p, i) => {
+        if (p.isBot || !p.wallet) return;
+        const e = lbEntry(p.wallet);
+        e.pvp.wagered += match.pot / 2;
+        if (i === winnerIndex) { e.pvp.wins++; e.pvp.won += payout; } else { e.pvp.losses++; }
+        const bm = (match.bestMs && match.bestMs[i] != null) ? match.bestMs[i] : null;
+        if (bm != null && (e.pvp.bestMs == null || bm < e.pvp.bestMs)) e.pvp.bestMs = bm;
+    });
+    lbSave();
 
     console.log(`[match ${match.id}] winner: ${winner.name} — payout ${fmt(payout)} SOL`);
 
@@ -421,6 +435,68 @@ app.post('/pin-reset-verify', express.json(), (req, res) => {
     } catch (e) { return res.status(400).json({ ok: false }); }
 });
 const server = http.createServer(app);
+// ---- Global leaderboard: every player ranked by points (points = wagered SOL x 1000) ----
+// PvP is recorded here server-side (authoritative — the server saw the match).
+// Bot matches are published by each player with a wallet signature (one tap in
+// the leaderboard view): no signature, no bot points on the board, so nobody
+// can inflate someone else's rank. Storage is in-memory + a best-effort JSON
+// snapshot (survives restarts, NOT Railway redeploys — a database makes it
+// permanent). The board starts fresh: matches played before this deploy were
+// never recorded, but any player can publish their on-device bot history.
+const LB_FILE = path.join(__dirname, 'leaderboard.json');
+const lbBoard = new Map(); // wallet -> {bot:{...}, pvp:{...}}
+const LB_LEVEL_PTS = [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000];
+function lbEntry(wallet){ if(!lbBoard.has(wallet)) lbBoard.set(wallet, {bot:{wagered:0,wins:0,losses:0,won:0,bestMs:null}, pvp:{wagered:0,wins:0,losses:0,won:0,bestMs:null}}); return lbBoard.get(wallet); }
+function lbSave(){ try{ fs.writeFileSync(LB_FILE, JSON.stringify([...lbBoard])); }catch(e){} }
+function lbLoad(){ try{ if(fs.existsSync(LB_FILE)){ const arr=JSON.parse(fs.readFileSync(LB_FILE,'utf8')); arr.forEach(([w,e])=>{ if(w && e && e.bot && e.pvp) lbBoard.set(w,e); }); } }catch(e){} }
+function lbLevel(points){ let lv=0; for(const p of LB_LEVEL_PTS){ if(points>=p) lv++; } return lv; }
+function lbTotals(e){
+    const wagered=e.bot.wagered+e.pvp.wagered, wins=e.bot.wins+e.pvp.wins, losses=e.bot.losses+e.pvp.losses, won=e.bot.won+e.pvp.won;
+    const bms=[e.bot.bestMs,e.pvp.bestMs].filter(x=>x!=null);
+    return {wagered, wins, losses, won, pnl:won-wagered, points:Math.floor(wagered*1000), bestMs:bms.length?Math.min(...bms):null};
+}
+function lbRows(){
+    const rows=[...lbBoard.entries()].map(([wallet,e])=>{ const t=lbTotals(e); return {wallet, ...t, level:lbLevel(t.points)}; });
+    rows.sort((a,b)=> b.points-a.points || b.wagered-a.wagered);
+    rows.forEach((r,i)=>r.rank=i+1);
+    return rows;
+}
+lbLoad();
+app.get('/leaderboard', (req, res) => {
+    const rows=lbRows();
+    const wallet=(req.query.wallet||'').toString();
+    let yourRank=null, yourEntry=null;
+    if(wallet){
+        const idx=rows.findIndex(r=>r.wallet===wallet);
+        if(idx>=0){ yourRank=rows[idx].rank; yourEntry=rows[idx]; }
+        else if(lbBoard.has(wallet)){ const t=lbTotals(lbBoard.get(wallet)); yourEntry={wallet, ...t, level:lbLevel(t.points), rank:null}; yourRank=rows.filter(r=>r.points>t.points).length+1; }
+    }
+    res.json({board: rows.slice(0,100), yourRank, yourEntry});
+});
+app.post('/leaderboard/report', express.json(), (req, res) => {
+    try {
+        const { wallet, wagered, wins, losses, won, bestMs, signature } = req.body || {};
+        if(!wallet || wagered===undefined || wins===undefined || losses===undefined || won===undefined || !signature) return res.status(400).json({ ok:false });
+        // The message is rebuilt VERBATIM from the sent strings, so the
+        // signature covers the exact data — tampering fails verification.
+        const crypto = require('crypto');
+        const { PublicKey } = require('@solana/web3.js');
+        const msg = `SolSwing leaderboard: ${wallet} wagered=${wagered} wins=${wins} losses=${losses} won=${won} bestMs=${bestMs==null?'':bestMs}`;
+        const pubkeyBytes = new PublicKey(wallet).toBytes();
+        const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(pubkeyBytes)]);
+        const keyObj = crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
+        const ok = crypto.verify(null, Buffer.from(msg, 'utf8'), keyObj, Buffer.from(signature, 'hex'));
+        if(!ok) return res.json({ ok:false });
+        const num = (x) => { const n=Number(x); return Number.isFinite(n)&&n>=0 ? n : null; };
+        const w=num(wagered), wi=num(wins), lo=num(losses), wn=num(won);
+        if(w==null||wi==null||lo==null||wn==null||w>1e6||wi>1e6||lo>1e6) return res.status(400).json({ ok:false });
+        const bm = (bestMs==null||bestMs==='') ? null : num(bestMs);
+        const e=lbEntry(wallet);
+        e.bot={wagered:w, wins:wi, losses:lo, won:wn, bestMs:bm};
+        lbSave();
+        return res.json({ ok:true });
+    } catch(e) { return res.status(400).json({ ok:false }); }
+});
 const wss = new WebSocket.Server({ server });
 
 // ---- Live arena chat: every connected client hears every message, and
