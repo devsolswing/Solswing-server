@@ -45,7 +45,6 @@ const RUG_MIN_MS = 4000;
 const RUG_MAX_MS = 9000;
 const SELL_WINDOW_MS = 5000;   // sells after this are ignored
 const TICK_MS = 150;
-const BOT_WAIT_MS = 5000;      // solo queue -> bot match after this long
 const MAX_WAGER_SOL = 100;
 const MIN_WAGER_SOL = 0.01;
 
@@ -365,24 +364,16 @@ wss.on('connection', (ws) => {
                 wallet,
                 name: wallet ? shortAddr(wallet) : 'PLAYER',
                 isBot: false,
-                botTimeout: null,
             };
 
             const waiting = queue.shift();
             if (waiting && waiting.ws.readyState === WebSocket.OPEN) {
-                clearTimeout(waiting.botTimeout); // cancel their solo-bot timer
                 createMatch(waiting, player);
             } else {
-                if (waiting) clearTimeout(waiting.botTimeout);
                 queue.push(player);
-                ws.send(JSON.stringify({ type: 'searching', timeoutMs: BOT_WAIT_MS }));
-                player.botTimeout = setTimeout(() => {
-                    const qi = queue.indexOf(player);
-                    if (qi === -1 || socketMatch.has(ws)) return;
-                    queue.splice(qi, 1);
-                    const bot = { ws: null, wager, wallet: null, name: 'SWING BOT', isBot: true };
-                    createMatch(player, bot);
-                }, BOT_WAIT_MS);
+                // Human-vs-human only: no bot fallback. The player waits
+                // here until another human queues.
+                ws.send(JSON.stringify({ type: 'searching' }));
             }
         }
 
@@ -406,7 +397,6 @@ wss.on('connection', (ws) => {
     ws.on('close', () => {
         const qi = queue.findIndex(p => p.ws === ws);
         if (qi !== -1) {
-            clearTimeout(queue[qi].botTimeout);
             queue.splice(qi, 1);
         }
         const match = matches.get(socketMatch.get(ws));
