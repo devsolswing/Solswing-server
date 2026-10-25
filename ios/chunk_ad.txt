@@ -1,4 +1,8 @@
-rt:(youMs!=null?youMs:null), sold:(youMs!=null), inputs:[], moves:0, pre:0};
+'); bs.classList.remove('hidden'); bs.textContent=(matchMode==='pvp')?'Find PvP Match — Stake & Play':'Queue Match — Stake & Play';
+  log('[session] disconnected from game session · all match state cleared · timers stopped');
+}
+function telCommit(who){
+  var yRec={rt:(youMs!=null?youMs:null), sold:(youMs!=null), inputs:[], moves:0, pre:0};
   if(roundTel){
     yRec.moves=roundTel.moves;
     for(var i=0;i<roundTel.events.length;i++){ var d=roundTel.events[i]-rugStamp; if(d<0) yRec.pre++; else yRec.inputs.push(d); }

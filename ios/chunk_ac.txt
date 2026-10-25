@@ -186,10 +186,11 @@ function botScaledParams(w){
 // are shown as upcoming, never as claimable). Records live on-device, keyed
 // by wallet — the wallet IS the player.
 var RW_LEVELS=[
-  {level:1, pts:1000, reward:5}, {level:2, pts:2000, reward:10}, {level:3, pts:4000, reward:20},
-  {level:4, pts:8000, reward:40}, {level:5, pts:16000, reward:80}, {level:6, pts:32000, reward:160},
-  {level:7, pts:64000, reward:320}, {level:8, pts:128000, reward:640}, {level:9, pts:256000, reward:1280}
+  {level:1, pts:1000, tokens:500000, cad:1.5}, {level:2, pts:2000, tokens:1000000, cad:3}, {level:3, pts:4000, tokens:2000000, cad:6},
+  {level:4, pts:8000, tokens:4000000, cad:12}, {level:5, pts:16000, tokens:8000000, cad:24}, {level:6, pts:32000, tokens:16000000, cad:48},
+  {level:7, pts:64000, tokens:32000000, cad:96}, {level:8, pts:128000, tokens:64000000, cad:192}, {level:9, pts:256000, tokens:128000000, cad:384}
 ];
+function rwRewardText(L){ return L.tokens.toLocaleString()+' $SWING (~$'+L.cad.toFixed(2)+' CAD)'; }
 function rwTier(level){ if(level<=0) return '—'; if(level<=3) return '🥉 Bronze'; if(level<=6) return '🥈 Silver'; return '🥇 Gold'; }
 function rwKey(){
   try{ if(chain && chain.playerKey) return 'solswing_rewards_'+chain.playerKey.toBase58(); }catch(e){}
@@ -217,22 +218,22 @@ function openRewards(){
   $('rw-level').textContent=s.level>0 ? ('Level '+s.level) : 'Unranked — wager 1 SOL to reach Level 1';
   $('rw-tier').textContent=s.tier;
   if(s.next){
-    $('rw-next').textContent='Level '+s.next.level+' at '+s.next.pts.toLocaleString()+' pts ($'+s.next.reward+' $SWING)';
+    $('rw-next').textContent='Level '+s.next.level+' at '+s.next.pts.toLocaleString()+' pts ('+rwRewardText(s.next)+')';
     $('rw-progress').style.width=Math.round(s.prog*100)+'%';
     $('rw-note').textContent=s.level>0
-      ? ('Next reward: $'+s.next.reward+' $SWING at Level '+s.next.level+' — '+(s.next.pts-s.pts).toLocaleString()+' pts to go.')
-      : ('Wager '+fmt((1000-s.pts)/1000)+' SOL more to reach Level 1 and unlock a $5 $SWING airdrop.');
+      ? ('Next reward: '+rwRewardText(s.next)+' at Level '+s.next.level+' — '+(s.next.pts-s.pts).toLocaleString()+' pts to go.')
+      : ('Wager '+fmt((1000-s.pts)/1000)+' SOL more to reach Level 1 and unlock a '+rwRewardText(RW_LEVELS[0])+' airdrop.');
   } else {
     $('rw-next').textContent='Max level reached';
     $('rw-progress').style.width='100%';
-    $('rw-note').textContent='Max level — $1,280 $SWING airdrop unlocked.';
+    $('rw-note').textContent='Max level — '+rwRewardText(RW_LEVELS[RW_LEVELS.length-1])+' airdrop unlocked.';
   }
   var rows='';
   for(var i=0;i<RW_LEVELS.length;i++){
     var L=RW_LEVELS[i];
     var reached=s.pts>=L.pts;
     var isCur=s.level===L.level;
-    rows+='<div style="display:flex;justify-content:space-between;gap:8px;padding:7px 10px;border-radius:8px;margin:3px 0;background:'+(isCur?'rgba(34,197,94,.25)':(reached?'rgba(34,197,94,.12)':'rgba(255,255,255,.04)'))+';border:1px solid '+(isCur?'var(--green)':'var(--line)')+'"><span>'+(reached?'✓ ':'')+'Level '+L.level+' · '+rwTier(L.level)+'</span><span>'+L.pts.toLocaleString()+' pts · $'+L.reward+' $SWING</span></div>';
+    rows+='<div style="display:flex;justify-content:space-between;gap:8px;padding:7px 10px;border-radius:8px;margin:3px 0;background:'+(isCur?'rgba(34,197,94,.25)':(reached?'rgba(34,197,94,.12)':'rgba(255,255,255,.04)'))+';border:1px solid '+(isCur?'var(--green)':'var(--line)')+'"><span>'+(reached?'✓ ':'')+'Level '+L.level+' · '+rwTier(L.level)+'</span><span>'+L.pts.toLocaleString()+' pts · '+rwRewardText(L)+'</span></div>';
   }
   $('rw-levels').innerHTML=rows;
   $('rewards-modal').classList.add('open');
@@ -822,8 +823,4 @@ function disconnectSession(){
   var dlbl=$('chart-score-label'); if(dlbl) dlbl.textContent='Match score · You – Bot';
   $('rug').classList.remove('active');
   var sell=$('btn-sell'); sell.classList.add('hidden'); sell.disabled=true;
-  var bs=$('btn-start'); bs.classList.remove('hidden'); bs.textContent=(matchMode==='pvp')?'Find PvP Match — Stake & Play':'Queue Match — Stake & Play';
-  log('[session] disconnected from game session · all match state cleared · timers stopped');
-}
-function telCommit(who){
-  var yRec={
+  var bs=$('btn-start
