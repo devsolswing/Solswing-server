@@ -1,4 +1,29 @@
-r('click', disconnectWallet);
+ch) cp.catch(function(){}); }
+  var wasPhantom=walletConnected && !walletDemo;
+  // An unsettled JOINED match keeps its whole chain context across the
+  // disconnect: its pot is locked on-chain and its settle is still owed.
+  // Wiping it here would strand the pot with no in-page way back. Any
+  // other chain state belongs to a finished or abandoned match — clear
+  // it, so a stale escrow can never leak into the next wallet session.
+  var settleOwedDc=!!(chain.pendingSettle && chain.joined && chain.escrowSig && !chain.settleSig);
+  walletConnected=false; walletDemo=false; walletAddr=''; walletFullAddr=''; balanceText='— SOL'; demoBalance=10;
+  chain.playerKey=null; chain.balanceLamports=null; if(!settleOwedDc) chain.pendingSettle=null; updateFaucetNote();
+  if(!settleOwedDc){ chain.escrowSig=null; chain.joinSig=null; chain.settleSig=null; chain.cancelSig=null; chain.joined=false; chain.matchId=null; chain.matchState=null; chain.vault=null; }
+  if(!active && matchWager===null) lockWager(false);
+  // Disconnect through the adapter. Local state is already torn down, so
+  // the adapter's 'disconnect' event listener no-ops instead of looping.
+  if(wasPhantom){ try{ var dp=walletAdapter.disconnect(); if(dp&&dp.catch) dp.catch(function(){}); }catch(e){} }
+  paintWalletButton();
+  closeMatchResult();
+  closeRefundResult();
+  log('[wallet] disconnected');
+}
+$('btn-join-game').addEventListener('click', function(){
+  closeMatchResult();
+  showScreen('game'); // no wallet → the game screen's connect popup greets them there
+  if(walletConnected) $('btn-start').click(); // a fresh match is a fresh stake — routes through the signature guard like every stake
+});
+$('btn-disconnect').addEventListener('click', disconnectWallet);
 function finishRound(who){
   if(!active) return; active=false; clearTimers();
   $('rug').classList.remove('active'); // round decided — clear the rug flash, result lives in the status line
@@ -52,6 +77,21 @@ function recordMatch(wonMatch, payoutAmt){
 }
 var navScreen='landing'; // last screen pushed to browser history (see the push in showScreen)
 function showScreen(name, fromPop){
+  // Username gate: nobody leaves the first page without an arena name. A name
+  // typed into the landing input is saved on the spot, so one tap on Enter
+  // both sets the name and moves on.
+  if(name!=='landing' && $('screen-landing') && $('screen-landing').classList.contains('active')){
+    var _inp=$('username-input');
+    var _cur=getUsername() || (_inp ? cleanUsername(_inp.value) : '');
+    if(!_cur){
+      var _hint=$('username-hint');
+      if(_hint){ _hint.textContent='Pick an arena name first — it\'s how you\'ll show up in chat.'; _hint.style.color='#fca5a5'; }
+      if(_inp) _inp.focus();
+      return;
+    }
+    saveUsername(_cur);
+    if(_inp && !_inp.value) _inp.value=_cur;
+  }
   ['landing','lobby','game','chat','info'].forEach(function(s){ $('screen-'+s).classList.toggle('active', s===name); });
   if(name!=='game') cleanupMatchmaking(); // leaving the game screen mid-queue or mid-countdown cancels matchmaking (wager refunded)
   // …and if that queue held a REAL on-chain escrow that never filled, the
@@ -76,7 +116,7 @@ function showScreen(name, fromPop){
   if(!fromPop && name!==navScreen){ try{ history.pushState({ss:name},'','#'+name); }catch(e){} }
   navScreen=name;
   window.scrollTo({top:0, behavior:'smooth'});
-  if(name==='chat'){ var cb=$('chat-box'); if(cb) cb.scrollTop=cb.scrollHeight; }
+  if(name==='chat'){ var cb=$('chat-box'); if(cb) cb.scrollTop=cb.scrollHeight; chatConnect(); }
   // Wallet connection lives on the GAME screen (no lobby tile): arriving
   // there without a wallet connected opens the connect popup.
   if(name==='game' && !walletConnected) openConnectModal();
@@ -311,22 +351,28 @@ $('cw-connect').addEventListener('click', connectWallet); // the popup stays ope
 
 document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ if(mmActive){ mmDisconnect(); return; } closeWalletModal(); closeMatchResult(); closeRefundResult(); closeConnectModal(); if(signPending) settleSignature(false); } });
 
-// ---------- Page 4 · Chat room (simulated players — production chat rides the game-server WebSocket) ----------
-var chatPlayers=[
-  {name:'DiamondDoge', color:'#fcd34d'},
-  {name:'WifHatWendy', color:'#f9a8d4'},
-  {name:'ChadwickTrades', color:'#93c5fd'},
-  {name:'JeetSlayer99', color:'#c4b5fd'},
-  {name:'PaperHandsPete', color:'#9ca3af'},
-  {name:'Swing Bot', color:'#86efac'}
-];
+// ---------- Arena username — created on the first page, saved on-device ----------
+function cleanUsername(v){ return String(v||'').replace(/[^A-Za-z0-9_]/g,'').slice(0,16); }
+function getUsername(){ try{ return cleanUsername(localStorage.getItem('solswing_username')||''); }catch(e){ return ''; } }
+function saveUsername(v){ var c=cleanUsername(v); if(!c) return false; try{ localStorage.setItem('solswing_username', c); }catch(e){} return true; }
+// ---------- Page 4 · Chat room — LIVE via the game-server WebSocket ----------
+function chatColor(name){ var colors=['#fcd34d','#f9a8d4','#93c5fd','#c4b5fd','#86efac','#fda4af','#fdba74']; var h=0; for(var i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))>>>0; return colors[h%colors.length]; }
+var chatSeenUsers={};
+function chatUserList(){
+  var el=$('chat-players'); if(!el) return;
+  var me=getUsername();
+  var html='';
+  if(me) html+='<div class="player-row"><span class="pdot"></span><span class="pname">'+me+' (you)</span></div>';
+  Object.keys(chatSeenUsers).forEach(function(n){ if(n!==me) html+='<div class="player-row"><span class="pdot"></span><span class="pname">'+n+'</span></div>'; });
+  el.innerHTML=html;
+}
 function chatClock(){ return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:false}); }
 function addChat(name, text, mine){
   var box=$('chat-box'); if(!box) return;
   var wrap=document.createElement('div'); wrap.className='msg'+(mine?' mine':'');
   var head=document.createElement('div'); head.className='mhead';
   var nm=document.createElement('span'); nm.className='mname'; nm.textContent=name;
-  nm.style.color = mine ? '#86efac' : ((chatPlayers.filter(function(p){return p.name===name})[0]||{}).color || '#f3f4f6');
+  nm.style.color = mine ? '#86efac' : chatColor(name);
   var tm=document.createElement('span'); tm.className='mtime'; tm.textContent=chatClock();
   head.appendChild(nm); head.appendChild(tm);
   var tx=document.createElement('div'); tx.className='mtext'; tx.textContent=text;
@@ -337,45 +383,44 @@ function addChatSys(text){
   var d=document.createElement('div'); d.className='msg sys'; d.textContent=text;
   box.appendChild(d); box.scrollTop=box.scrollHeight;
 }
-addChatSys('You joined #arena · demo room with simulated players');
-addChat('DiamondDoge','just sold at 190ms on that last rug. easiest 0.188 of my life');
-addChat('WifHatWendy','the pump ALWAYS looks real at 6 seconds. stay frosty out there');
-addChat('ChadwickTrades','anyone else on Degen difficulty today? the bot is cracked');
-addChat('JeetSlayer99','i blinked. BLINKED. lost the whole pot');
-addChat('Swing Bot','beep boop. queue up, humans — the next match needs a victim');
-addChat('PaperHandsPete','sold early AND still lost. skill issue. mine.');
-var chatReplies=[
-  'gg — run it back?',
-  'lmao classic arena behaviour',
-  'spacebar gang rise up',
-  'fr, the 5 second window is a lie. it is ALL reflex',
-  'queue a 0.25 match and say it with your chest',
-  'the bot sold at 250ms on me earlier. absolute robbery',
-  'diamond hands until the red flash, that is the whole game'
-];
-var chatAmbient=[
-  'new personal best: 204ms. CHAD status incoming',
-  'who else watches for the red flash instead of the chart?',
-  'devnet SOL is free and i STILL hate losing it',
-  'tip: hover the sell button, never rest your thumb on it',
-  'that last pump went the full 9 seconds, my heart was in my ears',
-  'jeet behaviour in the chat again, mods asleep'
-];
+addChatSys('Live arena chat — messages go to everyone connected right now.');
+var _storedName=getUsername(); if(_storedName){ var _uInp=$('username-input'); if(_uInp) _uInp.value=_storedName; }
+var chatSocket=null;
+var CHAT_WS_URL='wss://solswing-server-production.up.railway.app/';
+function chatConnect(){
+  chatUserList();
+  if(chatSocket && (chatSocket.readyState===WebSocket.OPEN || chatSocket.readyState===WebSocket.CONNECTING)) return;
+  try{ chatSocket=new WebSocket(CHAT_WS_URL); }catch(e){ addChatSys('Live chat unavailable — messages stay on this device.'); return; }
+  chatSocket.onopen=function(){ addChatSys('Connected to live arena chat.'); chatUserList(); };
+  chatSocket.onmessage=function(ev){
+    try{
+      var m=JSON.parse(ev.data);
+      if(m.type==='chat' && m.user && m.text){
+        chatSeenUsers[m.user]=true; chatUserList();
+        addChat(m.user, m.text, m.user===getUsername());
+      } else if(m.type==='presence'){
+        var p=$('chat-online'); if(p) p.textContent=m.count+' online';
+      }
+    }catch(e){}
+  };
+  chatSocket.onclose=function(){ chatSocket=null; };
+}
 $('chat-form').addEventListener('submit', function(e){
   e.preventDefault();
   var inp=$('chat-input'); var v=inp.value.trim(); if(!v) return;
-  inp.value=''; addChat('You', v, true);
-  setTimeout(function(){
-    var p=chatPlayers[Math.floor(Math.random()*chatPlayers.length)];
-    addChat(p.name, chatReplies[Math.floor(Math.random()*chatReplies.length)]);
-  }, 1600+Math.random()*2600);
+  inp.value='';
+  var me=getUsername();
+  if(!me){ addChatSys('Pick an arena name on the first page before chatting.'); return; }
+  if(chatSocket && chatSocket.readyState===WebSocket.OPEN){
+    // No local echo: the server broadcasts back to the sender too, so your
+    // message appears once, in the same stream as everyone else's.
+    chatSocket.send(JSON.stringify({type:'chat', user:me, text:v.slice(0,240)}));
+  } else {
+    addChat(me, v, true);
+    addChatSys('Live chat not connected — your message shows only here.');
+    chatConnect();
+  }
 });
-setInterval(function(){
-  if(!$('screen-chat') || !$('screen-chat').classList.contains('active')) return;
-  if(Math.random()<0.5) return;
-  var p=chatPlayers[Math.floor(Math.random()*chatPlayers.length)];
-  addChat(p.name, chatAmbient[Math.floor(Math.random()*chatAmbient.length)]);
-}, 15000);
 
 dots();
 // Phantom-only gate on load: provider already injected → game shows.

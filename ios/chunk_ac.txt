@@ -1,4 +1,11 @@
-nfirmed · match '+chain.matchId.toString()+' · escrowed '+fmt(wagerSol)+' SOL into the vault · tx '+shortSig(sig),'winlog');
+ on this hosted build)
+      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+    ],
+    data:ixData(DISC.initialize_match, [u64le(chain.matchId), u64le(lamports)])
+  });
+  var sig=await phantomSend([ix]);
+  chain.escrowSig=sig; chain.lastTx=sig;
+  log('[chain] initialize_match confirmed · match '+chain.matchId.toString()+' · escrowed '+fmt(wagerSol)+' SOL into the vault · tx '+shortSig(sig),'winlog');
   refreshBalance().then(updateFaucetNote);
   return sig;
 }
@@ -685,18 +692,39 @@ function requireWalletSignature(actionLabel, detail, amountSol){
 // confirmed on-chain (real mode) or the signature lands (demo mode).
 function requireStake(detail, wagerSol){
   if(!realMode()) return requireWalletSignature('Stake', detail, wagerSol);
+  // No in-game transaction screen: Join Game goes straight to Phantom's own
+  // approval popup. The stake still resolves ONLY after Phantom confirms the
+  // escrow on-chain, and a Phantom decline still rejects so the caller aborts
+  // with zero moved. Phantom's popup itself stays — that is where the player
+  // approves spending, and it can never be skipped.
   return new Promise(function(resolve, reject){
     if(signPending){ var old=signPending; signPending=null; old.reject(new Error('superseded')); }
-    signPending={resolve:resolve, reject:reject, kind:'stake', wagerSol:wagerSol};
-    $('sg-action').textContent='STAKE · ON-CHAIN';
-    $('sg-detail').textContent=detail+' Phantom will ask you to approve the initialize_match transaction that escrows it into the SolSwing program vault on devnet.';
-    $('sg-amount').textContent=fmt(wagerSol)+' SOL';
-    $('sg-signed').classList.add('hidden');
-    var trx=$('sg-txrow'); if(trx) trx.classList.add('hidden');
-    $('sg-sign').textContent='✍️ Sign & Stake in Phantom';
-    $('sg-sign').disabled=false;
-    $('sign-modal').classList.add('open');
-    $('sg-sign').focus();
+    var myPending={resolve:resolve, reject:reject, kind:'stake', wagerSol:wagerSol};
+    signPending=myPending;
+    Promise.resolve().then(function(){ return chainStake(wagerSol); }).then(function(esig){
+      if(signPending!==myPending){
+        // Cancelled / superseded / wallet dropped WHILE Phantom was signing —
+        // but the escrow landed. Refund it now, never leave SOL locked behind
+        // a "stake not completed" message.
+        if(chain.escrowSig===esig && !chain.joined && !chain.cancelSig){
+          setStatus('⚠ Stake landed after the request was cancelled — refunding your escrow on-chain…');
+          chainCancel().then(function(){ setStatus('✓ Escrow refunded on-chain — no match started, no SOL kept.'); }).catch(function(){ setStatus('⚠ Escrow refund could not be sent — your SOL stays in the match vault; reconnect and leave the game screen to retry the refund.'); });
+          log('[chain] post-cancel escrow refund fired · tx '+shortSig(esig),'ruglog');
+        }
+        return;
+      }
+      signPending=null;
+      resolve(true);
+    }).catch(function(e){
+      if(signPending!==myPending){ return; } // already resolved by cancel/supersede — never touch the newer request
+      signPending=null;
+      if(e && e.message==='insufficient'){
+        // No modal anymore to hold the faucet directions, so leave them as the
+        // final status line after the caller's abort message lands.
+        setTimeout(function(){ setStatus('⚠ Not enough devnet SOL for this wager + rent/fees. Get free devnet SOL from faucet.solana.com, then Join Game again. Nothing has moved.'); }, 0);
+      }
+      reject(e);
+    });
   });
 }
 function settleSignature(okSig){
@@ -757,29 +785,4 @@ function disconnectWallet(){
   if(signPending) settleSignature(false); // an armed signature request dies with the session — it must never resolve against a disconnected wallet
   // An open, unfilled on-chain escrow gets its cancel_match refund fired
   // BEFORE the wallet drops — the refund needs your signature.
-  if(realMode() && phantomProvider() && chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig){ var cp=chainCancel(); if(cp&&cp.catch) cp.catch(function(){}); }
-  var wasPhantom=walletConnected && !walletDemo;
-  // An unsettled JOINED match keeps its whole chain context across the
-  // disconnect: its pot is locked on-chain and its settle is still owed.
-  // Wiping it here would strand the pot with no in-page way back. Any
-  // other chain state belongs to a finished or abandoned match — clear
-  // it, so a stale escrow can never leak into the next wallet session.
-  var settleOwedDc=!!(chain.pendingSettle && chain.joined && chain.escrowSig && !chain.settleSig);
-  walletConnected=false; walletDemo=false; walletAddr=''; walletFullAddr=''; balanceText='— SOL'; demoBalance=10;
-  chain.playerKey=null; chain.balanceLamports=null; if(!settleOwedDc) chain.pendingSettle=null; updateFaucetNote();
-  if(!settleOwedDc){ chain.escrowSig=null; chain.joinSig=null; chain.settleSig=null; chain.cancelSig=null; chain.joined=false; chain.matchId=null; chain.matchState=null; chain.vault=null; }
-  if(!active && matchWager===null) lockWager(false);
-  // Disconnect through the adapter. Local state is already torn down, so
-  // the adapter's 'disconnect' event listener no-ops instead of looping.
-  if(wasPhantom){ try{ var dp=walletAdapter.disconnect(); if(dp&&dp.catch) dp.catch(function(){}); }catch(e){} }
-  paintWalletButton();
-  closeMatchResult();
-  closeRefundResult();
-  log('[wallet] disconnected');
-}
-$('btn-join-game').addEventListener('click', function(){
-  closeMatchResult();
-  showScreen('game'); // no wallet → the game screen's connect popup greets them there
-  if(walletConnected) $('btn-start').click(); // a fresh match is a fresh stake — routes through the signature guard like every stake
-});
-$('btn-disconnect').addEventListene
+  if(realMode() && phantomProvider() && chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig){ var cp=chainCancel(); if(cp&&cp.cat

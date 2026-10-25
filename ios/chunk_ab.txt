@@ -1,4 +1,6 @@
-mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never through a link someone drops in chat.</p>
+<span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
+      <div class="sec-row"><span>Funds during a match</span><b>LOCKED IN THE ON-CHAIN VAULT UNTIL SETTLEMENT</b></div>
+      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never through a link someone drops in chat.</p>
     </div>
 
     <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
@@ -727,11 +729,4 @@ async function chainStake(wagerSol){
       { pubkey:chain.matchState, isSigner:false, isWritable:true },
       { pubkey:chain.vault, isSigner:false, isWritable:true },
       { pubkey:chain.playerKey, isSigner:true, isWritable:true },
-      { pubkey:chain.playerKey, isSigner:false, isWritable:false }, // adjudicator: your wallet (house matches on this hosted build)
-      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
-    ],
-    data:ixData(DISC.initialize_match, [u64le(chain.matchId), u64le(lamports)])
-  });
-  var sig=await phantomSend([ix]);
-  chain.escrowSig=sig; chain.lastTx=sig;
-  log('[chain] initialize_match co
+      { pubkey:chain.playerKey, isSigner:false, isWritable:false }, // adjudicator: your wallet (house matches

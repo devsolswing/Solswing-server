@@ -69,6 +69,17 @@ a{color:var(--green)}
 .hero-copy{padding:20px 20px 18px;background:var(--card);border:1px solid var(--line2);border-radius:var(--radius)}
 .hero-copy h1{font-size:28px;line-height:1.05;margin:8px 0 10px;letter-spacing:-.02em}
 .hero-copy p{color:var(--muted);line-height:1.55;margin:0 0 14px;font-size:15px}
+/* first page fits one screen on phones: tighter hero, clamped intro, compact stats */
+@media(max-width:700px){
+  body{padding:12px 12px 24px}
+  .hero{margin-bottom:10px}
+  .hero-img{min-height:130px}
+  .hero-copy{padding:12px 14px}
+  .hero-copy h1{font-size:22px;margin:6px 0 8px}
+  .hero-copy p{font-size:13px;line-height:1.45;margin:0 0 10px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+  .stat{padding:8px}
+  #btn-enter{margin-top:10px}
+}
 .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .stat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px}
 .stat strong{font-size:20px;display:block} .stat span{font-size:12px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
@@ -438,6 +449,11 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
         <div class="stat"><strong>250ms</strong><span>Bot best</span></div>
       </div>
       <p style="margin-top:12px;font-size:13px">Press <span class="kbd">Space</span> to sell when it rugs. Tab away mid-round and you forfeit — anti-rage-quit is on.</p>
+      <div style="margin-top:12px">
+        <label for="username-input" style="font-size:13px;color:var(--muted)">Your arena name</label>
+        <input type="text" id="username-input" maxlength="16" placeholder="Pick a name — e.g. DiamondDoge" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:10px 12px;font-family:inherit;font-size:15px;margin-top:6px">
+        <p id="username-hint" style="font-size:12.5px;color:var(--muted);margin:6px 0 0">Pick a name first — it's how you'll show up in live chat. Saved on this device.</p>
+      </div>
       <button class="bigbtn start" id="btn-enter" style="margin-top:14px">Enter the Arena <span class="blink">▸</span></button>
     </div>
   </div>
@@ -558,14 +574,9 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
     </div>
     <div class="chat-layout">
       <div class="card">
-        <h3 style="margin:0 0 6px;font-size:16px">In the room <span class="pill green" style="margin-left:6px">6 online</span></h3>
-        <div class="player-row"><span class="pdot"></span><span class="pname">DiamondDoge</span><span class="ptag">LVL 9 · CHAD</span></div>
-        <div class="player-row"><span class="pdot"></span><span class="pname">WifHatWendy</span><span class="ptag">LVL 7 · CHAD</span></div>
-        <div class="player-row"><span class="pdot"></span><span class="pname">ChadwickTrades</span><span class="ptag">LVL 6</span></div>
-        <div class="player-row"><span class="pdot"></span><span class="pname">JeetSlayer99</span><span class="ptag">LVL 4</span></div>
-        <div class="player-row"><span class="pdot idle"></span><span class="pname">PaperHandsPete</span><span class="ptag">LVL 2 · IDLE</span></div>
-        <div class="player-row"><span class="pdot bot"></span><span class="pname">Swing Bot</span><span class="ptag">HOUSE BOT</span></div>
-        <p style="color:var(--muted);font-size:12.5px;line-height:1.55;margin:12px 0 0">Demo room with simulated players — in production, chat runs over the same game-server WebSocket as matches, under your wallet name.</p>
+        <h3 style="margin:0 0 6px;font-size:16px">In the room <span class="pill green" style="margin-left:6px" id="chat-online">…</span></h3>
+        <div id="chat-players"></div>
+        <p style="color:var(--muted);font-size:12.5px;line-height:1.55;margin:12px 0 0">Live arena chat — messages go to everyone connected right now, under your arena name.</p>
       </div>
       <div class="card">
         <div class="chat-box" id="chat-box" aria-live="polite"></div>
@@ -611,6 +622,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <div class="sec-row"><span>Network right now</span><b>SOLANA DEVNET · PLAY MONEY, NO REAL VALUE</b></div>
       <div class="sec-row"><span>Seed phrase</span><b class="ok">NEVER ASKED FOR · CONNECT SHARES ONLY YOUR PUBLIC ADDRESS</b></div>
       <div class="sec-row"><span>Who decides the winner</span><b>THE GAME SERVER · TIMESTAMPS ON ARRIVAL</b></div>
-      <div class="sec-row"><span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
-      <div class="sec-row"><span>Funds during a match</span><b>LOCKED IN THE ON-CHAIN VAULT UNTIL SETTLEMENT</b></div>
-      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any 
+      <div class="sec-row">
