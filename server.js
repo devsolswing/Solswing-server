@@ -399,6 +399,27 @@ const app = express();
 // Only the public game client is served — program sources and keypairs
 // are never exposed over HTTP.
 app.use(express.static(path.join(__dirname, 'public')));
+// ---- PIN reset verify: a player who forgot their on-device PIN proves the
+// wallet by signing "SolSwing PIN reset for <wallet>" in Phantom. The server
+// checks the Ed25519 signature with Node's built-in crypto (no new deps) and
+// answers ok:true only for a real signature from that wallet. The PIN itself
+// never leaves the device and is never sent here — this endpoint only proves
+// wallet ownership so the client may clear its own local PIN. A bad signature
+// cannot be brute-forced: it is a cryptographic proof, not a guess. ----
+app.post('/pin-reset-verify', express.json(), (req, res) => {
+    try {
+        const { wallet, signature } = req.body || {};
+        if (!wallet || !signature) return res.status(400).json({ ok: false });
+        const crypto = require('crypto');
+        const { PublicKey } = require('@solana/web3.js');
+        const pubkeyBytes = new PublicKey(wallet).toBytes();
+        const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(pubkeyBytes)]);
+        const keyObj = crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
+        const msg = Buffer.from('SolSwing PIN reset for ' + wallet, 'utf8');
+        const ok = crypto.verify(null, msg, keyObj, Buffer.from(signature, 'hex'));
+        return res.json({ ok });
+    } catch (e) { return res.status(400).json({ ok: false }); }
+});
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 

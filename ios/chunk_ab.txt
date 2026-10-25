@@ -1,26 +1,4 @@
-LUE</b></div>
-      <div class="sec-row"><span>Seed phrase</span><b class="ok">NEVER ASKED FOR · CONNECT SHARES ONLY YOUR PUBLIC ADDRESS</b></div>
-      <div class="sec-row"><span>Who decides the winner</span><b>THE GAME SERVER · TIMESTAMPS ON ARRIVAL</b></div>
-      <div class="sec-row"><span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
-      <div class="sec-row"><span>Funds during a match</span><b>LOCKED IN THE ON-CHAIN VAULT UNTIL SETTLEMENT</b></div>
-      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never through a link someone drops in chat.</p>
-    </div>
-
-    <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
-    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not real-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
-    <details class="faq"><summary>How do I actually win?</summary><p>Pure reflexes. When the dev rugs, hit SELL (or press <span class="kbd">Space</span>) faster than your opponent. The server stamps your sell the moment it arrives — your own clock doesn't count — and sells later than 5 seconds after the rug don't count at all. Win 2 rounds to take the match.</p></details>
-    <details class="faq"><summary>Why does the winner get 94% and not 100%?</summary><p>The remaining 6% is the arena fee. It's fixed in the smart contract, goes to the SolSwing treasury wallet, and pays for the game server, on-chain settlement and development. It's taken from the pot at settlement — the winner's 94% is never touched afterwards.</p></details>
-    <details class="faq"><summary>What happens if I close the tab or switch apps mid-round?</summary><p>You forfeit. Anti-rage-quit is enforced by both the page and the server: hide the tab, disconnect or let the 5-second sell window lapse and the round — and, on a rage quit, the whole match pot — goes to your opponent.</p></details>
-    <details class="faq"><summary>Do I need a Phantom wallet to try it?</summary><p>Yes — SolSwing connects through Phantom only, and runs exclusively inside the Phantom app's built-in browser. Open Phantom, tap its browser icon, enter solswing.vercel.app, then tap Connect Wallet and approve in Phantom's native prompt — all without leaving the game. Devnet SOL is free play money, so wagering costs nothing real.</p></details>
-    <details class="faq"><summary>Can the other player cheat?</summary><p>Not from their browser. The rug timing, the sell timestamps and the winner are all decided by the game server, and the payout is executed by the on-chain program, which checks the winner and refuses double payouts. An edited client can change what it displays, but never the result.</p></details>
-    <details class="faq"><summary>Does it work on my phone?</summary><p>SolSwing plays inside the Phantom app's built-in browser on iPhone and Android. Open the Phantom app, tap the browser icon, and enter solswing.vercel.app — outside Phantom's browser the game shows an “Open in Phantom” prompt instead. Inside Phantom, Connect Wallet and every stake, settlement and refund signature happen natively in place: no app switching, no redirects. On mobile you tap SELL instead of pressing Space, and all five pages stack into a single thumb-friendly column.</p></details>
-  <!-- HOW IT WORKS -->
-  <div class="section">
-    <h2>Game-server based, not browser-trusted</h2>
-    <p class="lead">The original version decided everything in the browser — anyone could edit the rug time or fake a win. SolSwing flips that: the server is the referee, the Solana program is the vault.</p>
-    <div class="flow">
-      <div class="flow-step"><i>STEP 1 · ESCROW</i><h3>Both players stake</h3><p><span class="mono">initialize_match</span> (P1) + <span class="mono">join_match</span> (P2) lock equal wagers into a PDA vault. Two-phase, so nobody has to co-sign someone else's transaction.</p></div>
-      <div class="flow-step"><i>STEP 2 · SERVER ROUND</i><h3>Server picks the rug</h3><p>The Node server picks a secret rug moment, streams <span class="mono">tick</span> messages to both clients, then broadcasts <span class="mono">rug</span>. Clients learn it at the same instant the server stamps it.</p></div>
+ 2 · SERVER ROUND</i><h3>Server picks the rug</h3><p>The Node server picks a secret rug moment, streams <span class="mono">tick</span> messages to both clients, then broadcasts <span class="mono">rug</span>. Clients learn it at the same instant the server stamps it.</p></div>
       <div class="flow-step"><i>STEP 3 · REFLEX RACE</i><h3>Fastest sell wins</h3><p>Server timestamps sell messages on arrival — client timestamps are ignored. Late sells (&gt;5s), double sells, disconnects and hidden-tab forfeits are all handled server-side.</p></div>
       <div class="flow-step"><i>STEP 4 · SETTLE ON-CHAIN</i><h3>Adjudicator pays out</h3><p>Only the adjudicator (game server key) can call <span class="mono">settle_match</span>. The program checks the winner, then pays 94% to the winner and 6% to the treasury with checked math.</p></div>
     </div>
@@ -233,6 +211,15 @@ node server.js          # http + WebSocket on :8080, solo players get SWING BOT 
     <p class="wm-note" id="rw-note"></p>
     <div id="rw-levels" style="margin-top:10px"></div>
     <p class="wm-note">Airdrop rewards are planned and launch with $SWING — they are not claimable yet.</p>
+  </div>
+</div>
+
+<!-- PIN LOCK MODAL — 4-digit sign-in per wallet (set / unlock / manage / change). -->
+<div class="modal-overlay" id="pin-modal" role="dialog" aria-modal="true" aria-labelledby="pin-title">
+  <div class="modal-card" style="max-width:360px">
+    <button class="modal-x" id="pin-modal-close" aria-label="Close PIN settings">✕</button>
+    <h3 id="pin-title" style="margin:0 0 8px">🔒 PIN lock</h3>
+    <div id="pin-body"></div>
   </div>
 </div>
 
@@ -721,4 +708,171 @@ async function refreshBalance(){
   for(var attempt=0;attempt<2;attempt++){
     try{
       var lam=await chainConn().getBalance(chain.playerKey);
-      chain.balanceLamports=
+      chain.balanceLamports=lam; balanceText=fmt(lam/1e9)+' SOL · devnet';
+      return lam;
+    }catch(e){ if(attempt===0) await new Promise(function(r){ setTimeout(r,700); }); }
+  }
+  return null;
+}
+function updateFaucetNote(){
+  var el=$('faucet-note'); if(!el) return;
+  var short = realMode() && chain.balanceLamports!==null && chain.balanceLamports < (Math.round(wager()*1e9)+3000000);
+  el.classList.toggle('hidden', !short);
+}
+// initialize_match — the player's REAL escrow. Throws Error('insufficient')
+// when the wallet can't cover wager + rent/fees (faucet territory).
+async function chainStake(wagerSol){
+  var lamports=Math.round(wagerSol*1e9);
+  // Refund any previous abandoned escrow before opening a new match.
+  if(chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig && phantomProvider()){
+    try{ await chainCancel(); }catch(e){ /* previous escrow stays locked on-chain; the new stake still proceeds */ }
+  }
+  chain.matchId=newMatchId();
+  var pdas=derivePdas(chain.matchId); chain.matchState=pdas.matchState; chain.vault=pdas.vault;
+  chain.joined=false; chain.escrowSig=null; chain.joinSig=null; chain.settleSig=null; chain.cancelSig=null; chain.pendingSettle=null;
+  var bal=await chainConn().getBalance(chain.playerKey);
+  chain.balanceLamports=bal; updateFaucetNote();
+  if(bal < lamports+3000000) throw new Error('insufficient');
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  var ix=new solanaWeb3.TransactionInstruction({
+    programId:pid,
+    keys:[
+      { pubkey:chain.matchState, isSigner:false, isWritable:true },
+      { pubkey:chain.vault, isSigner:false, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:true, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:false, isWritable:false }, // adjudicator: your wallet (house matches on this hosted build)
+      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+    ],
+    data:ixData(DISC.initialize_match, [u64le(chain.matchId), u64le(lamports)])
+  });
+  var sig=await phantomSend([ix]);
+  chain.escrowSig=sig; chain.lastTx=sig;
+  log('[chain] initialize_match confirmed · match '+chain.matchId.toString()+' · escrowed '+fmt(wagerSol)+' SOL into the vault · tx '+shortSig(sig),'winlog');
+  refreshBalance().then(updateFaucetNote);
+  return sig;
+}
+// join_match — the house opponent stakes the same wager, for real.
+async function chainBotJoin(wagerSol){
+  if(chain.joined) return chain.joinSig;
+  var lamports=Math.round(wagerSol*1e9);
+  var ok=false;
+  try{ ok=await fundBot(lamports+100000); }catch(e){ ok=false; }
+  if(!ok) throw new Error('opponent stake could not be funded (devnet faucet unreachable / rate-limited)');
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  var ix=new solanaWeb3.TransactionInstruction({
+    programId:pid,
+    keys:[
+      { pubkey:chain.matchState, isSigner:false, isWritable:true },
+      { pubkey:chain.vault, isSigner:false, isWritable:true },
+      { pubkey:chain.botKey.publicKey, isSigner:true, isWritable:true },
+      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+    ],
+    data:ixData(DISC.join_match, [u64le(chain.matchId)])
+  });
+  var sig=await botSend([ix]);
+  chain.joined=true; chain.joinSig=sig; chain.lastTx=sig;
+  log('[chain] join_match confirmed · opponent stake locked · pot '+fmt(wagerSol*2)+' SOL · tx '+shortSig(sig),'winlog');
+  return sig;
+}
+// cancel_match — abandoned-match refund path. Only valid pre-join, which
+// is exactly when the UI offers it (queue cancel, opponent drop, leaving).
+async function chainCancel(){
+  if(!chain.escrowSig || chain.joined || chain.cancelSig || chain.cancelBusy) return null;
+  chain.cancelBusy=true;
+  try{
+    var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+    var ix=new solanaWeb3.TransactionInstruction({
+      programId:pid,
+      keys:[
+        { pubkey:chain.matchState, isSigner:false, isWritable:true },
+        { pubkey:chain.vault, isSigner:false, isWritable:true },
+        { pubkey:chain.playerKey, isSigner:true, isWritable:true },
+        { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
+      ],
+      data:ixData(DISC.cancel_match, [u64le(chain.matchId)])
+    });
+    var sig=await phantomSend([ix]);
+    chain.cancelSig=sig; chain.lastTx=sig;
+    log('[chain] cancel_match confirmed · escrow refunded to your wallet · tx '+shortSig(sig),'winlog');
+    refreshBalance().then(updateFaucetNote);
+    return sig;
+  } finally { chain.cancelBusy=false; }
+}
+function buildSettleIx(winnerId, ctx){
+  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
+  // ctx (optional) is the account snapshot taken when the settle fell due —
+  // it wins over the live chain fields, so a settle retried after a NEW
+  // match has started still settles the match it actually belongs to.
+  var ms=(ctx&&ctx.matchState)?new solanaWeb3.PublicKey(ctx.matchState):chain.matchState;
+  var v=(ctx&&ctx.vault)?new solanaWeb3.PublicKey(ctx.vault):chain.vault;
+  var winnerKey=(ctx&&ctx.winnerKey)?new solanaWeb3.PublicKey(ctx.winnerKey):((winnerId===1) ? chain.playerKey : chain.botKey.publicKey);
+  var feeKey=new solanaWeb3.PublicKey(TREASURY_PUBKEY); // the program's locked fee receiver — account key only, never displayed
+  return new solanaWeb3.TransactionInstruction({
+    programId:pid,
+    keys:[
+      { pubkey:ms, isSigner:false, isWritable:true },
+      { pubkey:v, isSigner:false, isWritable:true },
+      { pubkey:winnerKey, isSigner:false, isWritable:true },
+      { pubkey:feeKey, isSigner:false, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:true, isWritable:false } // adjudicator signs
+    ],
+    data:ixData(DISC.settle_match, [new Uint8Array([winnerId])])
+  });
+}
+function setMmSettle(html){ var el=$('mm-settle'); if(el) el.innerHTML=html; }
+// settle_match — the adjudicator (your wallet) signs; the program itself
+// pays 94% to the winner and 6% to the locked treasury. Retry by tapping
+// the Settlement row in the match popup if the signature was declined.
+async function chainDoSettle(){
+  var ps=chain.pendingSettle; if(!ps || chain.settleSig || chain.settleBusy) return;
+  if(!realMode()){ setMmSettle('⚠ Connect your wallet to sign the settlement — the pot stays locked on-chain until you do.'); return; }
+  if(!treasuryLockOk()){ setMmSettle('⛔ Treasury lock check failed — settlement refused.'); return; }
+  chain.settleBusy=true;
+  setMmSettle('⏳ Settling on-chain — approve in Phantom…');
+  try{
+    var sig=await phantomSend([buildSettleIx(ps.winnerId, ps.accounts)]);
+    chain.settleSig=sig; chain.lastTx=sig; chain.pendingSettle=null;
+    setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(sig)+'" target="_blank" rel="noopener">tx '+shortSig(sig)+' ↗</a>');
+    log('[chain] settle_match confirmed · winner paid 94% · treasury fee 6% · tx '+shortSig(sig),'winlog');
+    refreshBalance().then(updateFaucetNote);
+  }catch(e){
+    setMmSettle('⚠ Settlement not signed — tap here to retry.');
+    log('[chain] settle_match not completed · the pot stays locked in the vault until settled','ruglog');
+  }
+  chain.settleBusy=false;
+}
+var wins=0, losses=0, level=1, roundNo=1;
+var active=false, rugged=false, tickTimer=null, rugTimer=null, botTimer=null, resolveTimer=null;
+var startAt=0, rugAt=0, rugStamp=0, youMs=null, botMs=null;
+var matchEndTimer=null; // legacy post-match handle — match end is now instant (disconnectSession), this stays cleared
+var telMatch={you:[],opp:[]}, roundTel=null, oppSnap=false, oppSnapMs=30; // per-round input timing records + opponent pace profile
+
+function wager(){ return Math.max(0.01, parseFloat($('wager').value)||0.1); }
+// The wager selector locks the moment a stake flow begins (pre-game or
+// matchmaking countdown, queue, signing) and stays locked until the match
+// ends or the flow aborts — the amount being played for can never change
+// mid-flight, so the pot lines and the payout math always match the stake
+// that was actually signed.
+function lockWager(lock){ var s=$('wager'); if(s) s.disabled=!!lock; }
+function fmt(n,d){ return n.toFixed(d==null?3:d); }
+function updatePot(){
+  var w=wager(), pot=w*2;
+  $('pot-line').textContent=fmt(pot)+' SOL'; $('win-line').textContent=fmt(pot*0.94)+' SOL'; $('fee-line').textContent=fmt(pot*0.06)+' SOL';
+  updateHUD();
+  if(typeof updateFaucetNote==='function') updateFaucetNote();
+}
+$('wager').addEventListener('input',updatePot); $('wager').addEventListener('change',updatePot); updatePot();
+
+function log(msg, cls){
+  var el=$('log'); if(!el) return; var t=new Date().toLocaleTimeString([], {hour12:false});
+  var div=document.createElement('div'); if(cls) div.className=cls;
+  div.innerHTML='<span class="t">['+t+']</span> '+msg; el.appendChild(div); el.scrollTop=el.scrollHeight;
+}
+function dots(){
+  function render(id, n, isLoss){ var c=$(id); if(!c) return; c.innerHTML=''; for(var i=0;i<2;i++){ var s=document.createElement('span'); s.className='dot'+(i<n?(isLoss?' loss':' win'):''); c.appendChild(s);} }
+  render('dots-you', wins, false); render('dots-bot', losses, true);
+  updateHUD();
+}
+function setStatus(t){ $('status').textContent=t; }
+// House ledger (per device): how much this player has staked in bot matches
+// vs how much they have won back. Drives the bot's difficulty curve —

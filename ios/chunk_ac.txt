@@ -1,171 +1,3 @@
-lam; balanceText=fmt(lam/1e9)+' SOL · devnet';
-      return lam;
-    }catch(e){ if(attempt===0) await new Promise(function(r){ setTimeout(r,700); }); }
-  }
-  return null;
-}
-function updateFaucetNote(){
-  var el=$('faucet-note'); if(!el) return;
-  var short = realMode() && chain.balanceLamports!==null && chain.balanceLamports < (Math.round(wager()*1e9)+3000000);
-  el.classList.toggle('hidden', !short);
-}
-// initialize_match — the player's REAL escrow. Throws Error('insufficient')
-// when the wallet can't cover wager + rent/fees (faucet territory).
-async function chainStake(wagerSol){
-  var lamports=Math.round(wagerSol*1e9);
-  // Refund any previous abandoned escrow before opening a new match.
-  if(chain.escrowSig && !chain.joined && !chain.cancelSig && !chain.settleSig && phantomProvider()){
-    try{ await chainCancel(); }catch(e){ /* previous escrow stays locked on-chain; the new stake still proceeds */ }
-  }
-  chain.matchId=newMatchId();
-  var pdas=derivePdas(chain.matchId); chain.matchState=pdas.matchState; chain.vault=pdas.vault;
-  chain.joined=false; chain.escrowSig=null; chain.joinSig=null; chain.settleSig=null; chain.cancelSig=null; chain.pendingSettle=null;
-  var bal=await chainConn().getBalance(chain.playerKey);
-  chain.balanceLamports=bal; updateFaucetNote();
-  if(bal < lamports+3000000) throw new Error('insufficient');
-  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
-  var ix=new solanaWeb3.TransactionInstruction({
-    programId:pid,
-    keys:[
-      { pubkey:chain.matchState, isSigner:false, isWritable:true },
-      { pubkey:chain.vault, isSigner:false, isWritable:true },
-      { pubkey:chain.playerKey, isSigner:true, isWritable:true },
-      { pubkey:chain.playerKey, isSigner:false, isWritable:false }, // adjudicator: your wallet (house matches on this hosted build)
-      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
-    ],
-    data:ixData(DISC.initialize_match, [u64le(chain.matchId), u64le(lamports)])
-  });
-  var sig=await phantomSend([ix]);
-  chain.escrowSig=sig; chain.lastTx=sig;
-  log('[chain] initialize_match confirmed · match '+chain.matchId.toString()+' · escrowed '+fmt(wagerSol)+' SOL into the vault · tx '+shortSig(sig),'winlog');
-  refreshBalance().then(updateFaucetNote);
-  return sig;
-}
-// join_match — the house opponent stakes the same wager, for real.
-async function chainBotJoin(wagerSol){
-  if(chain.joined) return chain.joinSig;
-  var lamports=Math.round(wagerSol*1e9);
-  var ok=false;
-  try{ ok=await fundBot(lamports+100000); }catch(e){ ok=false; }
-  if(!ok) throw new Error('opponent stake could not be funded (devnet faucet unreachable / rate-limited)');
-  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
-  var ix=new solanaWeb3.TransactionInstruction({
-    programId:pid,
-    keys:[
-      { pubkey:chain.matchState, isSigner:false, isWritable:true },
-      { pubkey:chain.vault, isSigner:false, isWritable:true },
-      { pubkey:chain.botKey.publicKey, isSigner:true, isWritable:true },
-      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
-    ],
-    data:ixData(DISC.join_match, [u64le(chain.matchId)])
-  });
-  var sig=await botSend([ix]);
-  chain.joined=true; chain.joinSig=sig; chain.lastTx=sig;
-  log('[chain] join_match confirmed · opponent stake locked · pot '+fmt(wagerSol*2)+' SOL · tx '+shortSig(sig),'winlog');
-  return sig;
-}
-// cancel_match — abandoned-match refund path. Only valid pre-join, which
-// is exactly when the UI offers it (queue cancel, opponent drop, leaving).
-async function chainCancel(){
-  if(!chain.escrowSig || chain.joined || chain.cancelSig || chain.cancelBusy) return null;
-  chain.cancelBusy=true;
-  try{
-    var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
-    var ix=new solanaWeb3.TransactionInstruction({
-      programId:pid,
-      keys:[
-        { pubkey:chain.matchState, isSigner:false, isWritable:true },
-        { pubkey:chain.vault, isSigner:false, isWritable:true },
-        { pubkey:chain.playerKey, isSigner:true, isWritable:true },
-        { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
-      ],
-      data:ixData(DISC.cancel_match, [u64le(chain.matchId)])
-    });
-    var sig=await phantomSend([ix]);
-    chain.cancelSig=sig; chain.lastTx=sig;
-    log('[chain] cancel_match confirmed · escrow refunded to your wallet · tx '+shortSig(sig),'winlog');
-    refreshBalance().then(updateFaucetNote);
-    return sig;
-  } finally { chain.cancelBusy=false; }
-}
-function buildSettleIx(winnerId, ctx){
-  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
-  // ctx (optional) is the account snapshot taken when the settle fell due —
-  // it wins over the live chain fields, so a settle retried after a NEW
-  // match has started still settles the match it actually belongs to.
-  var ms=(ctx&&ctx.matchState)?new solanaWeb3.PublicKey(ctx.matchState):chain.matchState;
-  var v=(ctx&&ctx.vault)?new solanaWeb3.PublicKey(ctx.vault):chain.vault;
-  var winnerKey=(ctx&&ctx.winnerKey)?new solanaWeb3.PublicKey(ctx.winnerKey):((winnerId===1) ? chain.playerKey : chain.botKey.publicKey);
-  var feeKey=new solanaWeb3.PublicKey(TREASURY_PUBKEY); // the program's locked fee receiver — account key only, never displayed
-  return new solanaWeb3.TransactionInstruction({
-    programId:pid,
-    keys:[
-      { pubkey:ms, isSigner:false, isWritable:true },
-      { pubkey:v, isSigner:false, isWritable:true },
-      { pubkey:winnerKey, isSigner:false, isWritable:true },
-      { pubkey:feeKey, isSigner:false, isWritable:true },
-      { pubkey:chain.playerKey, isSigner:true, isWritable:false } // adjudicator signs
-    ],
-    data:ixData(DISC.settle_match, [new Uint8Array([winnerId])])
-  });
-}
-function setMmSettle(html){ var el=$('mm-settle'); if(el) el.innerHTML=html; }
-// settle_match — the adjudicator (your wallet) signs; the program itself
-// pays 94% to the winner and 6% to the locked treasury. Retry by tapping
-// the Settlement row in the match popup if the signature was declined.
-async function chainDoSettle(){
-  var ps=chain.pendingSettle; if(!ps || chain.settleSig || chain.settleBusy) return;
-  if(!realMode()){ setMmSettle('⚠ Connect your wallet to sign the settlement — the pot stays locked on-chain until you do.'); return; }
-  if(!treasuryLockOk()){ setMmSettle('⛔ Treasury lock check failed — settlement refused.'); return; }
-  chain.settleBusy=true;
-  setMmSettle('⏳ Settling on-chain — approve in Phantom…');
-  try{
-    var sig=await phantomSend([buildSettleIx(ps.winnerId, ps.accounts)]);
-    chain.settleSig=sig; chain.lastTx=sig; chain.pendingSettle=null;
-    setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(sig)+'" target="_blank" rel="noopener">tx '+shortSig(sig)+' ↗</a>');
-    log('[chain] settle_match confirmed · winner paid 94% · treasury fee 6% · tx '+shortSig(sig),'winlog');
-    refreshBalance().then(updateFaucetNote);
-  }catch(e){
-    setMmSettle('⚠ Settlement not signed — tap here to retry.');
-    log('[chain] settle_match not completed · the pot stays locked in the vault until settled','ruglog');
-  }
-  chain.settleBusy=false;
-}
-var wins=0, losses=0, level=1, roundNo=1;
-var active=false, rugged=false, tickTimer=null, rugTimer=null, botTimer=null, resolveTimer=null;
-var startAt=0, rugAt=0, rugStamp=0, youMs=null, botMs=null;
-var matchEndTimer=null; // legacy post-match handle — match end is now instant (disconnectSession), this stays cleared
-var telMatch={you:[],opp:[]}, roundTel=null, oppSnap=false, oppSnapMs=30; // per-round input timing records + opponent pace profile
-
-function wager(){ return Math.max(0.01, parseFloat($('wager').value)||0.1); }
-// The wager selector locks the moment a stake flow begins (pre-game or
-// matchmaking countdown, queue, signing) and stays locked until the match
-// ends or the flow aborts — the amount being played for can never change
-// mid-flight, so the pot lines and the payout math always match the stake
-// that was actually signed.
-function lockWager(lock){ var s=$('wager'); if(s) s.disabled=!!lock; }
-function fmt(n,d){ return n.toFixed(d==null?3:d); }
-function updatePot(){
-  var w=wager(), pot=w*2;
-  $('pot-line').textContent=fmt(pot)+' SOL'; $('win-line').textContent=fmt(pot*0.94)+' SOL'; $('fee-line').textContent=fmt(pot*0.06)+' SOL';
-  updateHUD();
-  if(typeof updateFaucetNote==='function') updateFaucetNote();
-}
-$('wager').addEventListener('input',updatePot); $('wager').addEventListener('change',updatePot); updatePot();
-
-function log(msg, cls){
-  var el=$('log'); if(!el) return; var t=new Date().toLocaleTimeString([], {hour12:false});
-  var div=document.createElement('div'); if(cls) div.className=cls;
-  div.innerHTML='<span class="t">['+t+']</span> '+msg; el.appendChild(div); el.scrollTop=el.scrollHeight;
-}
-function dots(){
-  function render(id, n, isLoss){ var c=$(id); if(!c) return; c.innerHTML=''; for(var i=0;i<2;i++){ var s=document.createElement('span'); s.className='dot'+(i<n?(isLoss?' loss':' win'):''); c.appendChild(s);} }
-  render('dots-you', wins, false); render('dots-bot', losses, true);
-  updateHUD();
-}
-function setStatus(t){ $('status').textContent=t; }
-// House ledger (per device): how much this player has staked in bot matches
-// vs how much they have won back. Drives the bot's difficulty curve —
 // unbeatable for the first 3 matches, then give-back until the player is
 // whole again, then the normal casino edge.
 function loadBotLedger(){ try{ var l=JSON.parse(localStorage.getItem('solswing_bot_ledger')||'null'); if(l && typeof l.wagered==='number' && typeof l.won==='number' && typeof l.matches==='number') return l; }catch(e){} return {wagered:0, won:0, matches:0}; }
@@ -242,6 +74,223 @@ function closeRewards(){ $('rewards-modal').classList.remove('open'); }
 $('rewards-tile').addEventListener('click', openRewards);
 $('rewards-modal-close').addEventListener('click', closeRewards);
 $('rewards-modal').addEventListener('click', function(e){ if(e.target===this) closeRewards(); });
+// ---------- PIN LOCK — opt-in 4-digit sign-in per wallet ----------
+// The PIN is a device-local lock, NOT the money's security: only the
+// Phantom wallet signature moves SOL. The PIN stops someone who grabs an
+// unlocked phone from opening your account and playing. It is stored as a
+// SHA-256 hash (PIN + wallet as salt), never as plain digits, never sent
+// anywhere. 5 wrong tries locks it for 5 minutes. Forgot it? Either prove
+// the wallet with a Phantom signature (server verifies, records kept) or
+// factory-reset the on-device account data for that wallet (PIN + rewards
+// cleared; SOL is always safe in Phantom).
+var pinUnlockedWallet=null;
+var pinModalBlocking=false;
+var PIN_RESET_URL='https://solswing-server-production.up.railway.app/pin-reset-verify';
+var PIN_RESET_MSG_PREFIX='SolSwing PIN reset for ';
+function pinKey(wallet){ return 'solswing_pin_'+wallet; }
+function loadPin(wallet){ try{ var r=JSON.parse(localStorage.getItem(pinKey(wallet))||'null'); if(r && typeof r.hash==='string') return r; }catch(e){} return null; }
+function savePin(wallet, rec){ try{ localStorage.setItem(pinKey(wallet), JSON.stringify(rec)); }catch(e){} }
+function clearPin(wallet){ try{ localStorage.removeItem(pinKey(wallet)); }catch(e){} }
+async function pinHash(pin, wallet){
+  var data=new TextEncoder().encode(pin+'|'+wallet);
+  var digest=await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+}
+function pinBytesToHex(bytes){ return Array.from(bytes).map(function(b){ return b.toString(16).padStart(2,'0'); }).join(''); }
+function pinCheck(){
+  if(!chain || !chain.playerKey) return;
+  var wallet=chain.playerKey.toBase58();
+  if(pinUnlockedWallet===wallet) return;
+  var rec=loadPin(wallet);
+  if(rec && rec.hash) pinShowUnlock(wallet);
+}
+function pinRefreshLobbyBtn(){
+  var b=$('pin-lobby-btn'); if(!b) return;
+  if(!chain || !chain.playerKey){ b.textContent='🔒 Set a PIN (connect wallet first)'; return; }
+  var wallet=chain.playerKey.toBase58();
+  var rec=loadPin(wallet);
+  b.textContent=rec && rec.hash ? '🔒 PIN lock: ON — manage' : '🔒 Set a 4-digit PIN';
+}
+function pinClose(){ $('pin-modal').classList.remove('open'); }
+function pinOpen(blocking){
+  pinModalBlocking=!!blocking;
+  $('pin-modal-close').classList.toggle('hidden', !!blocking);
+  $('pin-modal').classList.add('open');
+}
+function pinSetBody(html, wire){
+  $('pin-body').innerHTML=html;
+  if(wire) wire();
+}
+function pinErr(msg){ var e=$('pin-error'); if(e) e.textContent=msg||''; }
+function pinField(id, label){
+  return '<label style="display:block;margin:10px 0 4px;font-size:13px;color:var(--muted)">'+label+'</label><input id="'+id+'" type="password" inputmode="numeric" maxlength="4" autocomplete="off" style="width:100%;font-size:22px;letter-spacing:8px;text-align:center;padding:10px;border-radius:10px;border:1px solid var(--line2);background:var(--card);color:var(--text)">';
+}
+function pinNote(text){ return '<p class="wm-note">'+text+'</p>'; }
+function pinBtn(id, text, primary){
+  return '<button class="'+(primary?'bigbtn':'bigbtn ghost')+'" id="'+id+'" style="width:100%;margin-top:10px">'+text+'</button>';
+}
+function pinShowSet(wallet){
+  pinOpen(false);
+  pinSetBody(
+    pinNote('Pick a 4-digit PIN. It locks your account on this device — you\'ll enter it each time you open the game with this wallet. It\'s stored as a hash, never as plain digits, and it never leaves this device.') +
+    pinField('pin-new', 'New 4-digit PIN') + pinField('pin-confirm', 'Confirm PIN') +
+    '<p id="pin-error" style="color:#fca5a5;font-size:13px;min-height:18px;margin:8px 0 0"></p>' +
+    pinBtn('pin-save', 'Save PIN', true) + pinBtn('pin-cancel', 'Cancel', false),
+  function(){
+    var inp=$('pin-new'); if(inp) inp.focus();
+    $('pin-cancel').addEventListener('click', pinClose);
+    $('pin-save').addEventListener('click', async function(){
+      var a=$('pin-new').value.trim(), b=$('pin-confirm').value.trim();
+      if(!/^\d{4}$/.test(a)){ pinErr('PIN must be exactly 4 digits.'); return; }
+      if(a!==b){ pinErr('PINs don\'t match.'); return; }
+      try{
+        var h=await pinHash(a, wallet);
+        savePin(wallet, {hash:h, fails:0, lockUntil:0});
+        pinUnlockedWallet=wallet; pinModalBlocking=false; pinClose(); pinRefreshLobbyBtn();
+        setStatus('PIN set — you\'ll enter it each time you open the game with this wallet.');
+      }catch(e){ pinErr('PIN needs a secure connection (HTTPS) — it can\'t be set here.'); }
+    });
+  });
+}
+function pinShowUnlock(wallet){
+  pinOpen(true);
+  var rec=loadPin(wallet) || {};
+  var locked=rec.lockUntil && rec.lockUntil>Date.now();
+  pinSetBody(
+    pinNote(locked ? 'Too many wrong tries — locked for a few minutes. Use Forgot PIN to reset now, or wait and try again.' : 'Enter the 4-digit PIN for this wallet to sign in.') +
+    pinField('pin-unlock', '4-digit PIN') +
+    '<p id="pin-error" style="color:#fca5a5;font-size:13px;min-height:18px;margin:8px 0 0"></p>' +
+    pinBtn('pin-unlock-btn', 'Unlock', true) + pinBtn('pin-forgot', 'Forgot PIN?', false),
+  function(){
+    var inp=$('pin-unlock'); if(inp) inp.focus();
+    $('pin-forgot').addEventListener('click', function(){ pinShowForgot(wallet); });
+    $('pin-unlock-btn').addEventListener('click', async function(){
+      var cur=loadPin(wallet) || {};
+      if(cur.lockUntil && cur.lockUntil>Date.now()){
+        var mins=Math.ceil((cur.lockUntil-Date.now())/60000);
+        pinErr('Still locked — try again in about '+mins+' minute'+(mins===1?'':'s')+', or use Forgot PIN.');
+        return;
+      }
+      var a=$('pin-unlock').value.trim();
+      if(!/^\d{4}$/.test(a)){ pinErr('Enter your 4-digit PIN.'); return; }
+      try{
+        var h=await pinHash(a, wallet);
+        if(h===cur.hash){
+          cur.fails=0; cur.lockUntil=0; savePin(wallet, cur);
+          pinUnlockedWallet=wallet; pinModalBlocking=false; pinClose(); pinRefreshLobbyBtn();
+          setStatus('Signed in — welcome back.');
+        } else {
+          cur.fails=(cur.fails||0)+1;
+          if(cur.fails>=5){ cur.lockUntil=Date.now()+300000; cur.fails=0; savePin(wallet, cur); pinErr('Too many wrong tries — locked for 5 minutes. Use Forgot PIN to reset now, or wait.'); }
+          else { savePin(wallet, cur); pinErr('Wrong PIN — '+(5-cur.fails)+' '+(5-cur.fails===1?'try':'tries')+' left.'); }
+        }
+      }catch(e){ pinErr('PIN check needs a secure connection (HTTPS).'); }
+    });
+  });
+}
+function pinShowForgot(wallet){
+  pinOpen(true);
+  pinSetBody(
+    pinNote('Two ways back in:') +
+    pinBtn('pin-reset-sig', 'Reset with wallet signature (keeps your records)', true) +
+    pinNote('Phantom asks you to sign a reset message. The server checks the signature belongs to this wallet, then clears the PIN. Your wagered records stay.') +
+    pinBtn('pin-reset-factory', 'Factory reset (clears PIN + on-device rewards)', false) +
+    pinNote('No server needed. This wipes the PIN and this wallet\'s on-device rewards records on this device. Your SOL stays safe in Phantom.') +
+    pinBtn('pin-forgot-back', 'Back', false) +
+    '<p id="pin-error" style="color:#fca5a5;font-size:13px;min-height:18px;margin:8px 0 0"></p>',
+  function(){
+    $('pin-forgot-back').addEventListener('click', function(){ pinShowUnlock(wallet); });
+    $('pin-reset-factory').addEventListener('click', function(){
+      pinSetBody(
+        pinNote('Factory reset clears the PIN and this wallet\'s on-device rewards records (points, levels) on this device. They can\'t be recovered. Your SOL stays safe in Phantom.') +
+        pinBtn('pin-factory-yes', 'Yes, factory reset', true) + pinBtn('pin-factory-no', 'Cancel', false),
+      function(){
+        $('pin-factory-no').addEventListener('click', function(){ pinShowForgot(wallet); });
+        $('pin-factory-yes').addEventListener('click', function(){
+          clearPin(wallet);
+          try{ localStorage.removeItem('solswing_rewards_'+wallet); }catch(e){}
+          pinUnlockedWallet=wallet; pinModalBlocking=false; pinClose(); pinRefreshLobbyBtn();
+          setStatus('PIN + on-device records cleared for this wallet. Set a new PIN from the lobby if you want.');
+        });
+      });
+    });
+    $('pin-reset-sig').addEventListener('click', async function(){
+      pinErr('Waiting for Phantom — approve the reset signature…');
+      try{
+        var msg=PIN_RESET_MSG_PREFIX+wallet;
+        var res=await walletAdapter.signMessage(new TextEncoder().encode(msg));
+        var sigHex=pinBytesToHex(res.signature);
+        var r=await fetch(PIN_RESET_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({wallet:wallet, signature:sigHex})});
+        var j=await r.json();
+        if(j && j.ok){
+          clearPin(wallet);
+          pinUnlockedWallet=wallet; pinModalBlocking=false; pinClose(); pinRefreshLobbyBtn();
+          setStatus('PIN reset — set a new one from the lobby if you want.');
+        } else { pinErr('Signature didn\'t check out — try again, or use factory reset.'); }
+      }catch(e){
+        if(e && e.code===4001) pinErr('Signature declined in Phantom — try again, or use factory reset.');
+        else pinErr('Couldn\'t reach the server to verify — try again, or use factory reset.');
+      }
+    });
+  });
+}
+function pinShowManage(wallet){
+  pinOpen(false);
+  pinSetBody(
+    pinNote('A PIN is set for this wallet. You\'ll enter it each time you open the game with this wallet.') +
+    pinBtn('pin-change', 'Change PIN', true) + pinBtn('pin-remove', 'Remove PIN', false) + pinBtn('pin-manage-close', 'Close', false),
+  function(){
+    $('pin-manage-close').addEventListener('click', pinClose);
+    $('pin-change').addEventListener('click', function(){ pinShowChange(wallet); });
+    $('pin-remove').addEventListener('click', function(){
+      pinSetBody(
+        pinNote('Remove the PIN for this wallet? You\'ll no longer be asked to sign in.') +
+        pinBtn('pin-remove-yes', 'Yes, remove PIN', true) + pinBtn('pin-remove-no', 'Cancel', false),
+      function(){
+        $('pin-remove-no').addEventListener('click', function(){ pinShowManage(wallet); });
+        $('pin-remove-yes').addEventListener('click', function(){
+          clearPin(wallet); pinClose(); pinRefreshLobbyBtn();
+          setStatus('PIN removed for this wallet.');
+        });
+      });
+    });
+  });
+}
+function pinShowChange(wallet){
+  pinOpen(false);
+  pinSetBody(
+    pinNote('Enter your current PIN, then a new one.') +
+    pinField('pin-old', 'Current PIN') + pinField('pin-new2', 'New 4-digit PIN') + pinField('pin-confirm2', 'Confirm new PIN') +
+    '<p id="pin-error" style="color:#fca5a5;font-size:13px;min-height:18px;margin:8px 0 0"></p>' +
+    pinBtn('pin-change-save', 'Save new PIN', true) + pinBtn('pin-change-cancel', 'Cancel', false),
+  function(){
+    $('pin-change-cancel').addEventListener('click', function(){ pinShowManage(wallet); });
+    $('pin-change-save').addEventListener('click', async function(){
+      var old=$('pin-old').value.trim(), a=$('pin-new2').value.trim(), b=$('pin-confirm2').value.trim();
+      var cur=loadPin(wallet) || {};
+      try{
+        if(await pinHash(old, wallet)!==cur.hash){ pinErr('Current PIN is wrong.'); return; }
+        if(!/^\d{4}$/.test(a)){ pinErr('New PIN must be exactly 4 digits.'); return; }
+        if(a!==b){ pinErr('New PINs don\'t match.'); return; }
+        savePin(wallet, {hash:await pinHash(a, wallet), fails:0, lockUntil:0});
+        pinClose(); pinRefreshLobbyBtn();
+        setStatus('PIN changed.');
+      }catch(e){ pinErr('PIN change needs a secure connection (HTTPS).'); }
+    });
+  });
+}
+$('pin-modal-close').addEventListener('click', function(){ if(!pinModalBlocking) pinClose(); });
+$('pin-modal').addEventListener('click', function(e){ if(e.target===this && !pinModalBlocking) pinClose(); });
+$('pin-lobby-btn').addEventListener('click', function(){
+  if(!chain || !chain.playerKey){ setStatus('Connect a wallet first — the PIN locks your wallet\'s account.'); return; }
+  var wallet=chain.playerKey.toBase58();
+  var rec=loadPin(wallet);
+  if(rec && rec.hash){
+    if(pinUnlockedWallet===wallet) pinShowManage(wallet);
+    else pinShowUnlock(wallet);
+  } else pinShowSet(wallet);
+});
+pinRefreshLobbyBtn();
 var botPhase='normal';
 
 function clearTimers(){ [tickTimer,rugTimer,botTimer,resolveTimer].forEach(function(x){ if(x){clearInterval(x); clearTimeout(x);} }); tickTimer=rugTimer=botTimer=resolveTimer=null; }
@@ -823,4 +872,45 @@ function disconnectSession(){
   var dlbl=$('chart-score-label'); if(dlbl) dlbl.textContent='Match score · You – Bot';
   $('rug').classList.remove('active');
   var sell=$('btn-sell'); sell.classList.add('hidden'); sell.disabled=true;
-  var bs=$('btn-start
+  var bs=$('btn-start'); bs.classList.remove('hidden'); bs.textContent=(matchMode==='pvp')?'Find PvP Match — Stake & Play':'Queue Match — Stake & Play';
+  log('[session] disconnected from game session · all match state cleared · timers stopped');
+}
+function telCommit(who){
+  var yRec={rt:(youMs!=null?youMs:null), sold:(youMs!=null), inputs:[], moves:0, pre:0};
+  if(roundTel){
+    yRec.moves=roundTel.moves;
+    for(var i=0;i<roundTel.events.length;i++){ var d=roundTel.events[i]-rugStamp; if(d<0) yRec.pre++; else yRec.inputs.push(d); }
+    roundTel=null;
+  }
+  if(yRec.sold&&yRec.inputs.length===0) yRec.inputs.push(yRec.rt);
+  telMatch.you.push(yRec);
+  var oSold=(who==='bot');
+  var oRec={rt:(oSold?botMs:null), sold:oSold, inputs:[], moves:0, pre:0};
+  if(oSold){ oRec.inputs.push(botMs); oRec.moves=oppSnap?0:Math.round(12+Math.random()*48); }
+  telMatch.opp.push(oRec);
+}
+function reviewWinner(side){
+  var all=telMatch[side]||[], recs=[], i;
+  for(i=0;i<all.length;i++){ if(all[i].sold&&all[i].rt!=null) recs.push(all[i]); }
+  var out={voided:false, score:0};
+  if(recs.length<2) return out;
+  var rts=recs.map(function(r){ return r.rt; });
+  var mean=0, mv=0, k;
+  for(k=0;k<rts.length;k++) mean+=rts[k];
+  mean/=rts.length;
+  var varSum=0; for(k=0;k<rts.length;k++) varSum+=(rts[k]-mean)*(rts[k]-mean);
+  var sd=Math.sqrt(varSum/rts.length), cv=mean>0?sd/mean:1;
+  var mx=Math.max.apply(null,rts), mn=Math.min.apply(null,rts);
+  for(k=0;k<recs.length;k++) mv+=recs[k].moves;
+  mv/=recs.length;
+  var fast=(mean<100&&mx<130), steady=(cv<0.08&&(mx-mn)<25), still=(mv<2);
+  out.score=(fast?45:0)+(steady?30:0)+(still?25:0);
+  out.voided=(fast&&steady&&still);
+  return out;
+}
+function endMatch(won, note){
+  var w=(matchWager!==null?matchWager:wager()); // this match's stake per player
+  var pot=w*2;
+  var finalScore=wins+' – '+losses; // captured BEFORE the session state is wiped
+  var oppLbl=oppShort; // likewise captured before the wipe
+  // Settlement shape mirrors the adjudicator's sett

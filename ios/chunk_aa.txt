@@ -518,6 +518,7 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
         <span class="tgo">▸</span>
       </button>
     </div>
+    <button id="pin-lobby-btn" style="margin-top:12px;width:100%;padding:10px;border-radius:12px;border:1px solid var(--line2);background:transparent;color:var(--muted);font-family:inherit;font-size:13px;cursor:pointer">🔒 Set a 4-digit PIN</button>
   </section>
 
   <!-- GAME SCREEN — compact: chart + controls only, Sell sits high, no scrolling.
@@ -624,4 +625,26 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
     <div class="card">
       <h3 style="margin:0 0 4px;font-size:17px">Wallet &amp; safety</h3>
       <div class="sec-row"><span>Wallet</span><b>PHANTOM APP · BUILT-IN BROWSER ONLY</b></div>
-      <div class="sec-row"><span>Network right now</span><b>SOLANA DEVNET · PLAY MONEY, NO REAL VA
+      <div class="sec-row"><span>Network right now</span><b>SOLANA DEVNET · PLAY MONEY, NO REAL VALUE</b></div>
+      <div class="sec-row"><span>Seed phrase</span><b class="ok">NEVER ASKED FOR · CONNECT SHARES ONLY YOUR PUBLIC ADDRESS</b></div>
+      <div class="sec-row"><span>Who decides the winner</span><b>THE GAME SERVER · TIMESTAMPS ON ARRIVAL</b></div>
+      <div class="sec-row"><span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
+      <div class="sec-row"><span>Funds during a match</span><b>LOCKED IN THE ON-CHAIN VAULT UNTIL SETTLEMENT</b></div>
+      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never through a link someone drops in chat.</p>
+    </div>
+
+    <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
+    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not real-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
+    <details class="faq"><summary>How do I actually win?</summary><p>Pure reflexes. When the dev rugs, hit SELL (or press <span class="kbd">Space</span>) faster than your opponent. The server stamps your sell the moment it arrives — your own clock doesn't count — and sells later than 5 seconds after the rug don't count at all. Win 2 rounds to take the match.</p></details>
+    <details class="faq"><summary>Why does the winner get 94% and not 100%?</summary><p>The remaining 6% is the arena fee. It's fixed in the smart contract, goes to the SolSwing treasury wallet, and pays for the game server, on-chain settlement and development. It's taken from the pot at settlement — the winner's 94% is never touched afterwards.</p></details>
+    <details class="faq"><summary>What happens if I close the tab or switch apps mid-round?</summary><p>You forfeit. Anti-rage-quit is enforced by both the page and the server: hide the tab, disconnect or let the 5-second sell window lapse and the round — and, on a rage quit, the whole match pot — goes to your opponent.</p></details>
+    <details class="faq"><summary>Do I need a Phantom wallet to try it?</summary><p>Yes — SolSwing connects through Phantom only, and runs exclusively inside the Phantom app's built-in browser. Open Phantom, tap its browser icon, enter solswing.vercel.app, then tap Connect Wallet and approve in Phantom's native prompt — all without leaving the game. Devnet SOL is free play money, so wagering costs nothing real.</p></details>
+    <details class="faq"><summary>Can the other player cheat?</summary><p>Not from their browser. The rug timing, the sell timestamps and the winner are all decided by the game server, and the payout is executed by the on-chain program, which checks the winner and refuses double payouts. An edited client can change what it displays, but never the result.</p></details>
+    <details class="faq"><summary>Does it work on my phone?</summary><p>SolSwing plays inside the Phantom app's built-in browser on iPhone and Android. Open the Phantom app, tap the browser icon, and enter solswing.vercel.app — outside Phantom's browser the game shows an “Open in Phantom” prompt instead. Inside Phantom, Connect Wallet and every stake, settlement and refund signature happen natively in place: no app switching, no redirects. On mobile you tap SELL instead of pressing Space, and all five pages stack into a single thumb-friendly column.</p></details>
+  <!-- HOW IT WORKS -->
+  <div class="section">
+    <h2>Game-server based, not browser-trusted</h2>
+    <p class="lead">The original version decided everything in the browser — anyone could edit the rug time or fake a win. SolSwing flips that: the server is the referee, the Solana program is the vault.</p>
+    <div class="flow">
+      <div class="flow-step"><i>STEP 1 · ESCROW</i><h3>Both players stake</h3><p><span class="mono">initialize_match</span> (P1) + <span class="mono">join_match</span> (P2) lock equal wagers into a PDA vault. Two-phase, so nobody has to co-sign someone else's transaction.</p></div>
+      <div class="flow-step"><i>STEP
