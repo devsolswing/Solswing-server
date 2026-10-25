@@ -1,4 +1,4 @@
-e vault · tx '+shortSig(sig),'winlog');
+nfirmed · match '+chain.matchId.toString()+' · escrowed '+fmt(wagerSol)+' SOL into the vault · tx '+shortSig(sig),'winlog');
   refreshBalance().then(updateFaucetNote);
   return sig;
 }
@@ -782,6 +782,4 @@ $('btn-join-game').addEventListener('click', function(){
   showScreen('game'); // no wallet → the game screen's connect popup greets them there
   if(walletConnected) $('btn-start').click(); // a fresh match is a fresh stake — routes through the signature guard like every stake
 });
-$('btn-disconnect').addEventListener('click', disconnectWallet);
-function finishRound(who){
-  if(!active) return; active=f
+$('btn-disconnect').addEventListene

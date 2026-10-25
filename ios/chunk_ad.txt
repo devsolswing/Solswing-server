@@ -1,4 +1,6 @@
-alse; clearTimers();
+r('click', disconnectWallet);
+function finishRound(who){
+  if(!active) return; active=false; clearTimers();
   $('rug').classList.remove('active'); // round decided — clear the rug flash, result lives in the status line
   if(who==='you'&&youMs==null) youMs=Date.now()-rugStamp;
   if(botMs==null) botMs=9999;
