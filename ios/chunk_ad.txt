@@ -1,4 +1,13 @@
-mWager)+' SOL · LOCKED';
+p=(Math.random()<0.15); oppSnapMs=26+Math.random()*14;
+  var lbl=$('chart-score-label'); if(lbl) lbl.textContent='Match score · You – '+oppName;
+  setStatus('⚔️ '+oppName+' joined — both bets locked!');
+  log('[matchmaking] opponent found: '+oppName+' · their '+fmt(mmWager)+' SOL locked · pot '+fmt(mmWager*2)+' SOL','winlog');
+  showMmCountdown(); // both bets locked → the 5s matchmaking countdown
+}
+function showMmCountdown(){
+  var ov=$('mm-countdown'); if(!ov) return;
+  mmActive=true;
+  $('mm-you-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
   $('mm-opp-name').textContent='🔴 '+oppName;
   $('mm-opp-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
   $('mm-pot').textContent=fmt(mmWager*2)+' SOL';
