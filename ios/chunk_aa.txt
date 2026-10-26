@@ -81,6 +81,13 @@ a{color:var(--green)}
   box-shadow:0 0 18px rgba(34,197,94,.35), inset -6px -8px 14px rgba(0,0,0,.45)}
 @keyframes asteroid-float{from{transform:translateY(-4px) rotate(-3deg)}to{transform:translateY(6px) rotate(4deg)}}
 @media(prefers-reduced-motion:reduce){.asteroid{animation:none}}
+/* first-screen poster layout — title top, username + PIN centered, ENTER bottom, no scroll */
+#screen-landing.active{display:flex;flex-direction:column;min-height:calc(100vh - 60px);min-height:calc(100dvh - 60px)}
+#screen-landing .hero{flex:1;display:flex;flex-direction:column}
+#screen-landing .hero-copy{flex:1;display:flex;flex-direction:column;text-align:center}
+#screen-landing .landing-center{flex:1;display:flex;flex-direction:column;justify-content:center;width:100%;max-width:320px;margin:0 auto;text-align:center}
+#screen-landing .landing-center label{text-align:left;display:block}
+#screen-landing #btn-enter{width:auto;align-self:center;padding:12px 36px;margin-top:auto}
 /* breathing room on inner screens so the floating buttons never sit on a heading or the HUD */
 #screen-lobby,#screen-game,#screen-chat,#screen-info{padding-top:52px}
 @media(max-width:560px){
@@ -143,6 +150,7 @@ a{color:var(--green)}
   .theme-footer{font-size:9px;margin-top:6px;padding-top:6px}
   #screen-landing .bigbtn.start{padding:10px;font-size:15px}
   #screen-landing #pin-lobby-btn{padding:8px;margin-bottom:6px}
+  #screen-landing.active{min-height:calc(100vh - 20px);min-height:calc(100dvh - 20px)}
 }
 .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .stat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px}
@@ -503,28 +511,19 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
     <div class="asteroid" aria-hidden="true" style="width:34px;height:32px;bottom:20%;right:-8px"></div>
     <div class="asteroid green" aria-hidden="true" style="width:28px;height:26px;top:6%;right:10%"></div>
   <div class="hero">
-    <button id="pin-lobby-btn" style="width:100%;padding:12px;margin-bottom:12px;border-radius:14px;border:2px solid var(--purple);background:rgba(10,10,22,.88);color:var(--purple-l);font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 0 16px rgba(168,85,247,.25)">🔒 PIN lock</button>
     <div class="hero-copy">
-      <div class="theme-planet" aria-hidden="true"><span class="ring"></span><span class="dot d1"></span><span class="dot d2"></span></div>
       <svg class="theme-title" viewBox="0 0 400 90" role="img" aria-label="SolSwing"><defs><path id="title-arc" d="M 20,75 Q 200,5 380,75" fill="none"/></defs><text><textPath href="#title-arc" startOffset="50%" text-anchor="middle">SOLSWING</textPath></text></svg>
-      <p style="font-size:11px;color:var(--muted);margin:6px 0 0">The friendliest reflex game on Solana</p>
-      <h1>Watch it pump.<br>Beat the rug.</h1>
-      <p>Two players stake SOL. First to sell before the rug wins the round. Win 2 rounds, take <b style="color:var(--text)">94% of the pot</b>.</p>
-      <div class="how-steps"><span class="how-step">1 · Name</span><span class="how-step">2 · Connect</span><span class="how-step">3 · Sell!</span></div>
-      <div class="stats">
-        <div class="stat"><strong id="stat-pot">Min 0.01 SOL</strong><span>Match pot</span></div>
-        <div class="stat"><strong>4–9s</strong><span>Until rug</span></div>
-        <div class="stat"><strong>250ms</strong><span>Bot best</span></div>
+      <div class="landing-center">
+        <div>
+          <label for="username-input" style="font-size:13px;color:var(--muted)">Your arena name</label>
+          <input type="text" id="username-input" maxlength="16" placeholder="Pick a name — e.g. DiamondDoge" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:10px;font-family:inherit;font-size:15px;margin-top:6px">
+          <p id="username-hint" style="font-size:12.5px;color:var(--muted);margin:6px 0 0">Your chat name · saved on this device.</p>
+        </div>
+        <button id="pin-lobby-btn" style="width:100%;padding:12px;margin-top:16px;border-radius:14px;border:2px solid var(--purple);background:rgba(10,10,22,.88);color:var(--purple-l);font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 0 16px rgba(168,85,247,.25)">🔒 PIN lock</button>
       </div>
-      <div style="margin-top:8px">
-        <label for="username-input" style="font-size:13px;color:var(--muted)">Your arena name</label>
-        <input type="text" id="username-input" maxlength="16" placeholder="Pick a name — e.g. DiamondDoge" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:7px 9px;font-family:inherit;font-size:15px;margin-top:6px">
-        <p id="username-hint" style="font-size:12.5px;color:var(--muted);margin:6px 0 0">Pick a name first — it's how you'll show up in live chat. Saved on this device.</p>
-      </div>
-      <button class="bigbtn start" id="btn-enter" style="margin-top:14px">Enter the Arena <span class="blink">▸</span></button>
+      <button class="bigbtn start" id="btn-enter">ENTER</button>
     </div>
   </div>
-    <div class="theme-footer" aria-hidden="true"><span>🚀 1P</span><span class="pf">◆ INSERT COIN ◆</span><span>CREDIT 00</span></div>
   </section>
 
   <!-- PAGE 2 · LOBBY — one screen, no scrolling: Join Game on top, then the
@@ -693,4 +692,8 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <div class="sec-row"><span>Who decides the winner</span><b>THE GAME SERVER · TIMESTAMPS ON ARRIVAL</b></div>
       <div class="sec-row"><span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
       <div class="sec-row"><span>Funds during a match</span><b>LOCKED IN THE ON-CHAIN VAULT UNTIL SETTLEMENT</b></div>
-      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phant
+      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never through a link someone drops in chat.</p>
+    </div>
+
+    <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
+    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not re

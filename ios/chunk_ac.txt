@@ -1,7 +1,4 @@
-[
-      { pubkey:ms, isSigner:false, isWritable:true },
-      { pubkey:v, isSigner:false, isWritable:true },
-      { pubkey:winnerKey, isSigner:false, isWritable:true },
+},
       { pubkey:feeKey, isSigner:false, isWritable:true },
       { pubkey:chain.playerKey, isSigner:true, isWritable:false } // adjudicator signs
     ],
@@ -927,4 +924,6 @@ function enterWaiting(){
 function opponentJoins(){
   if(!waiting) return; waiting=false; waitTimer=null;
   $('btn-cancel-queue').classList.add('hidden');
-  oppName=PVP_NAMES[Math.floor(Math.random()*PVP_NAMES.length)]; oppShort=oppN
+  oppName=PVP_NAMES[Math.floor(Math.random()*PVP_NAMES.length)]; oppShort=oppName;
+  oppSnap=(Math.random()<0.15); oppSnapMs=26+Math.random()*14;
+  var lbl=$('cha

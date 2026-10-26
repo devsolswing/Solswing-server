@@ -1,8 +1,4 @@
-om app's built-in browser — never through a link someone drops in chat.</p>
-    </div>
-
-    <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
-    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not real-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
+al-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
     <details class="faq"><summary>How do I actually win?</summary><p>Pure reflexes. When the dev rugs, hit SELL (or press <span class="kbd">Space</span>) faster than your opponent. The server stamps your sell the moment it arrives — your own clock doesn't count — and sells later than 5 seconds after the rug don't count at all. Win 2 rounds to take the match.</p></details>
     <details class="faq"><summary>Why does the winner get 94% and not 100%?</summary><p>The remaining 6% is the arena fee. It's fixed in the smart contract, goes to the SolSwing treasury wallet, and pays for the game server, on-chain settlement and development. It's taken from the pot at settlement — the winner's 94% is never touched afterwards.</p></details>
     <details class="faq"><summary>What happens if I close the tab or switch apps mid-round?</summary><p>You forfeit. Anti-rage-quit is enforced by both the page and the server: hide the tab, disconnect or let the 5-second sell window lapse and the round — and, on a rage quit, the whole match pot — goes to your opponent.</p></details>
@@ -853,4 +849,7 @@ function buildSettleIx(winnerId, ctx){
   var feeKey=new solanaWeb3.PublicKey(TREASURY_PUBKEY); // the program's locked fee receiver — account key only, never displayed
   return new solanaWeb3.TransactionInstruction({
     programId:pid,
-    keys:
+    keys:[
+      { pubkey:ms, isSigner:false, isWritable:true },
+      { pubkey:v, isSigner:false, isWritable:true },
+      { pubkey:winnerKey, isSigner:false, isWritable:true 
