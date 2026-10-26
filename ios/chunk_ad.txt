@@ -1,4 +1,5 @@
-p=(Math.random()<0.15); oppSnapMs=26+Math.random()*14;
+ame;
+  oppSnap=(Math.random()<0.15); oppSnapMs=26+Math.random()*14;
   var lbl=$('chart-score-label'); if(lbl) lbl.textContent='Match score · You – '+oppName;
   setStatus('⚔️ '+oppName+' joined — both bets locked!');
   log('[matchmaking] opponent found: '+oppName+' · their '+fmt(mmWager)+' SOL locked · pot '+fmt(mmWager*2)+' SOL','winlog');

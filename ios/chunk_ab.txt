@@ -1,4 +1,4 @@
- through a link someone drops in chat.</p>
+om app's built-in browser — never through a link someone drops in chat.</p>
     </div>
 
     <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
@@ -853,5 +853,4 @@ function buildSettleIx(winnerId, ctx){
   var feeKey=new solanaWeb3.PublicKey(TREASURY_PUBKEY); // the program's locked fee receiver — account key only, never displayed
   return new solanaWeb3.TransactionInstruction({
     programId:pid,
-    keys:[
-      { pubkey:ms, isS
+    keys:

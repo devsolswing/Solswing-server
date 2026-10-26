@@ -125,22 +125,24 @@ a{color:var(--green)}
 .hero-copy p{color:var(--muted);line-height:1.55;margin:0 0 14px;font-size:15px}
 /* first page fits one screen on phones: tighter hero, clamped intro, compact stats */
 @media(max-width:700px){
-  body{padding:12px 12px 16px}
-  .hero{margin-bottom:8px}
+  body{padding:8px 10px 10px}
+  .hero{margin-bottom:6px}
   .hero-img{min-height:110px}
-  .hero-copy{padding:8px 10px}
-  .hero-copy h1{font-size:19px;margin:4px 0 6px}
-  .hero-copy p{font-size:12px;line-height:1.4;margin:0 0 8px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
-  .stat{padding:6px}
-  .stat strong{font-size:17px}
+  .hero-copy{padding:6px 8px}
+  .hero-copy h1{font-size:17px;margin:2px 0 4px}
+  .hero-copy p{font-size:11px;line-height:1.35;margin:0 0 6px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+  .stats{gap:6px}
+  .stat{padding:4px}
+  .stat strong{font-size:15px}
   #btn-enter{margin-top:8px}
   .pill-logo{min-width:160px;height:44px;font-size:19px}
-  .how-step{font-size:10px;padding:4px 7px}
-  .theme-planet{width:30px;height:30px}
-  .theme-title{max-width:240px}
-  .theme-footer{font-size:9px;margin-top:8px}
-  #screen-landing .bigbtn.start{padding:12px;font-size:15px}
-  #screen-landing #pin-lobby-btn{padding:10px;margin-bottom:8px}
+  .how-steps{margin:0 0 8px;flex-wrap:nowrap}
+  .how-step{font-size:9px;padding:3px 6px}
+  .theme-planet{width:26px;height:26px}
+  .theme-title{max-width:220px}
+  .theme-footer{font-size:9px;margin-top:6px;padding-top:6px}
+  #screen-landing .bigbtn.start{padding:10px;font-size:15px}
+  #screen-landing #pin-lobby-btn{padding:8px;margin-bottom:6px}
 }
 .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .stat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px}
@@ -508,7 +510,7 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <p style="font-size:11px;color:var(--muted);margin:6px 0 0">The friendliest reflex game on Solana</p>
       <h1>Watch it pump.<br>Beat the rug.</h1>
       <p>Two players stake SOL. First to sell before the rug wins the round. Win 2 rounds, take <b style="color:var(--text)">94% of the pot</b>.</p>
-      <div class="how-steps"><span class="how-step">1 · Pick a name</span><span class="how-step">2 · Connect Phantom</span><span class="how-step">3 · Sell before the rug!</span></div>
+      <div class="how-steps"><span class="how-step">1 · Name</span><span class="how-step">2 · Connect</span><span class="how-step">3 · Sell!</span></div>
       <div class="stats">
         <div class="stat"><strong id="stat-pot">Min 0.01 SOL</strong><span>Match pot</span></div>
         <div class="stat"><strong>4–9s</strong><span>Until rug</span></div>
@@ -516,7 +518,7 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       </div>
       <div style="margin-top:8px">
         <label for="username-input" style="font-size:13px;color:var(--muted)">Your arena name</label>
-        <input type="text" id="username-input" maxlength="16" placeholder="Pick a name — e.g. DiamondDoge" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:8px 10px;font-family:inherit;font-size:15px;margin-top:6px">
+        <input type="text" id="username-input" maxlength="16" placeholder="Pick a name — e.g. DiamondDoge" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:7px 9px;font-family:inherit;font-size:15px;margin-top:6px">
         <p id="username-hint" style="font-size:12.5px;color:var(--muted);margin:6px 0 0">Pick a name first — it's how you'll show up in live chat. Saved on this device.</p>
       </div>
       <button class="bigbtn start" id="btn-enter" style="margin-top:14px">Enter the Arena <span class="blink">▸</span></button>
@@ -691,4 +693,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <div class="sec-row"><span>Who decides the winner</span><b>THE GAME SERVER · TIMESTAMPS ON ARRIVAL</b></div>
       <div class="sec-row"><span>Tab away mid-round</span><b class="warn">FORFEIT · ANTI-RAGE-QUIT IS ALWAYS ON</b></div>
       <div class="sec-row"><span>Funds during a match</span><b>LOCKED IN THE ON-CHAIN VAULT UNTIL SETTLEMENT</b></div>
-      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never
+      <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phant
