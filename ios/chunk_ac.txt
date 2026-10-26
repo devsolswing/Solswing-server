@@ -1,4 +1,25 @@
-nd stays locked until the match
+  try{
+    var sig=await phantomSend([buildSettleIx(ps.winnerId, ps.accounts)]);
+    chain.settleSig=sig; chain.lastTx=sig; chain.pendingSettle=null;
+    setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(sig)+'" target="_blank" rel="noopener">tx '+shortSig(sig)+' ↗</a>');
+    log('[chain] settle_match confirmed · winner paid 94% · treasury fee 6% · tx '+shortSig(sig),'winlog');
+    refreshBalance().then(updateFaucetNote);
+  }catch(e){
+    setMmSettle('⚠ Settlement not signed — tap here to retry.');
+    log('[chain] settle_match not completed · the pot stays locked in the vault until settled','ruglog');
+  }
+  chain.settleBusy=false;
+}
+var wins=0, losses=0, level=1, roundNo=1;
+var active=false, rugged=false, tickTimer=null, rugTimer=null, botTimer=null, resolveTimer=null;
+var startAt=0, rugAt=0, rugStamp=0, youMs=null, botMs=null;
+var matchBestMs=null; // fastest reflex this match (bot mode) — merged into the stats record at match end
+var matchEndTimer=null; // legacy post-match handle — match end is now instant (disconnectSession), this stays cleared
+var telMatch={you:[],opp:[]}, roundTel=null, oppSnap=false, oppSnapMs=30; // per-round input timing records + opponent pace profile
+
+function wager(){ return Math.max(0.01, parseFloat($('wager').value)||0.1); }
+// The wager selector locks the moment a stake flow begins (pre-game or
+// matchmaking countdown, queue, signing) and stays locked until the match
 // ends or the flow aborts — the amount being played for can never change
 // mid-flight, so the pot lines and the payout math always match the stake
 // that was actually signed.
@@ -896,17 +917,4 @@ function opponentJoins(){
 function showMmCountdown(){
   var ov=$('mm-countdown'); if(!ov) return;
   mmActive=true;
-  $('mm-you-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
-  $('mm-opp-name').textContent='🔴 '+oppName;
-  $('mm-opp-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
-  $('mm-pot').textContent=fmt(mmWager*2)+' SOL';
-  $('mm-note').textContent='Both bets are locked in the pot. Round 1 starts at zero.';
-  $('mm-disconnect').classList.remove('hidden');
-  ov.classList.add('open');
-  mmDeadline=Date.now()+5000;
-  // Simulated line drop: occasionally the opponent's connection dies mid-
-  // countdown (production: the server's opponent_left message) — handled by
-  // opponentDropped(), which cancels and returns YOU to the lobby.
-  mmOppDropAt=(Math.random()<0.15) ? Date.now()+1600+Math.random()*2200 : 0;
-  var numEl=$('mm-num'); numEl.style.color='';
-  func
+  $('mm-you-bet').textContent=fmt(mmWager)+' SOL · LOCKE

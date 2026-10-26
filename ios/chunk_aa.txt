@@ -8,20 +8,30 @@
 <title>SolSwing — Solana PvP Swing Arena</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Luckiest+Guy&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Luckiest+Guy&family=Press+Start+2P&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@solana/web3.js@1.95.3/lib/index.iife.min.js"></script>
 <style>
 :root{
-  --bg:#0c0f12; --bg2:rgba(13,18,25,.88); --card:rgba(16,22,29,.87); --card2:rgba(24,32,42,.9); --line:#2d3748; --line2:rgba(30,41,59,.85);
-  --green:#22c55e; --green-l:#86efac; --red:#ef4444; --red-d:#991b1b; --amber:#f59e0b;
+  --bg:#000000; --bg2:rgba(13,18,25,.88); --card:rgba(16,22,29,.87); --card2:rgba(24,32,42,.9); --line:#2d3748; --line2:rgba(30,41,59,.85);
+  --green:#22c55e; --green-l:#86efac; --purple:#a855f7; --purple-l:#d8b4fe; --red:#ef4444; --red-d:#991b1b; --amber:#f59e0b;
   --text:#f3f4f6; --muted:#9ca3af; --muted2:#6b7280;
   --radius:20px;
 }
 *{box-sizing:border-box} html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--text);font-family:'Fredoka',system-ui,sans-serif;padding:18px 14px 40px}
-/* site-wide background — the Shiba concept art itself, full opacity, fixed behind all content */
-body::before{content:"";position:fixed;inset:0;z-index:-1;background:#0c0f12 url(assets/concept-art.jpg) center center/cover no-repeat}
-@media(max-width:700px){body::before{background-position:66% center}}
+/* site-wide background — arcade space: CSS starfield + purple/green nebula glows (no image fetch) */
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:#000;
+  background-image:
+    radial-gradient(1.5px 1.5px at 42px 60px,rgba(255,255,255,.9),transparent 65%),
+    radial-gradient(2px 2px at 168px 210px,rgba(134,239,172,.8),transparent 65%),
+    radial-gradient(1.5px 1.5px at 300px 96px,rgba(216,180,254,.8),transparent 65%),
+    radial-gradient(2px 2px at 452px 330px,rgba(255,255,255,.7),transparent 65%),
+    radial-gradient(1.5px 1.5px at 96px 428px,rgba(134,239,172,.7),transparent 65%),
+    radial-gradient(2.5px 2.5px at 388px 486px,rgba(168,85,247,.8),transparent 65%),
+    radial-gradient(900px 500px at 85% 8%,rgba(168,85,247,.16),transparent 60%),
+    radial-gradient(700px 420px at 12% 88%,rgba(34,197,94,.12),transparent 60%);
+  background-size:520px 520px,520px 520px,520px 520px,520px 520px,520px 520px,520px 520px,100% 100%,100% 100%;
+  background-repeat:repeat,repeat,repeat,repeat,repeat,repeat,no-repeat,no-repeat}
 /* text that sits directly on the artwork gets a shadow halo for readability — the art stays untouched */
 .topbar .tagline,.screen-head h2,.screen-head p,.section>h2,.section>p.lead,#screen-info>h3,footer{text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 16px rgba(0,0,0,.65),0 0 34px rgba(0,0,0,.4)}
 a{color:var(--green)}
@@ -34,6 +44,17 @@ a{color:var(--green)}
 .float-back{left:max(10px,calc(50% - 560px))}
 .float-right{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));right:max(10px,calc(50% - 560px));z-index:55;display:flex;gap:8px;align-items:center}
 .float-right .btn-wallet{white-space:nowrap;box-shadow:0 8px 22px rgba(0,0,0,.5)}
+.float-right .btn-wallet{border:2px solid var(--purple);color:var(--purple-l);background:rgba(10,10,22,.92);box-shadow:0 0 14px rgba(168,85,247,.35)}
+/* arcade space theme — planet + arched pixel title + cabinet footer */
+.theme-planet{position:relative;width:44px;height:44px;margin:2px auto 0;border-radius:50%;background:radial-gradient(circle at 35% 30%,#d8b4fe,#a855f7 55%,#6b21a8);box-shadow:0 0 24px rgba(168,85,247,.7)}
+.theme-planet .ring{position:absolute;left:-14px;right:-14px;top:50%;height:14px;margin-top:-7px;border:3px solid rgba(216,180,254,.9);border-radius:50%;transform:rotate(-18deg)}
+.theme-planet .dot{position:absolute;border-radius:50%;background:#22c55e}
+.theme-planet .d1{width:9px;height:9px;left:10px;top:14px}
+.theme-planet .d2{width:6px;height:6px;right:12px;bottom:10px}
+.theme-title{display:block;width:100%;max-width:320px;margin:2px auto 0;filter:drop-shadow(0 0 12px rgba(168,85,247,.8))}
+.theme-title text{font-family:'Press Start 2P',monospace;font-size:34px;fill:#4ade80;stroke:#a855f7;stroke-width:1.2;letter-spacing:2px}
+.theme-footer{display:flex;justify-content:space-between;gap:8px;margin-top:12px;padding-top:10px;border-top:2px solid rgba(34,197,94,.5);font-family:'Press Start 2P',monospace;font-size:10px;color:var(--green)}
+.theme-footer .pf{color:var(--purple-l)}
 /* breathing room on inner screens so the floating buttons never sit on a heading or the HUD */
 #screen-lobby,#screen-game,#screen-chat,#screen-info{padding-top:52px}
 @media(max-width:560px){
@@ -80,14 +101,17 @@ a{color:var(--green)}
 @media(max-width:700px){
   body{padding:12px 12px 24px}
   .hero{margin-bottom:10px}
-  .hero-img{min-height:130px}
-  .hero-copy{padding:12px 14px}
+  .hero-img{min-height:110px}
+  .hero-copy{padding:10px 12px}
   .hero-copy h1{font-size:22px;margin:6px 0 8px}
   .hero-copy p{font-size:13px;line-height:1.45;margin:0 0 10px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
   .stat{padding:8px}
   #btn-enter{margin-top:10px}
   .pill-logo{min-width:160px;height:44px;font-size:19px}
   .how-step{font-size:11px;padding:5px 8px}
+  .theme-planet{width:36px;height:36px}
+  .theme-title{max-width:260px}
+  .theme-footer{font-size:9px;margin-top:10px}
 }
 .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .stat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px}
@@ -127,8 +151,9 @@ label{font-size:13px;color:var(--muted);font-weight:600}
 input[type=number],select{width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:11px 12px;font-family:inherit;font-size:15px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .bigbtn{width:100%;padding:16px;border-radius:14px;border:0;font-family:inherit;font-size:17px;font-weight:700;cursor:pointer}
-.bigbtn.start{background:var(--green);color:#041207} .bigbtn.start:hover{background:var(--green-l)}
-.bigbtn.sell{background:var(--red);color:#fff} .bigbtn.sell:disabled{background:#374151;color:#9ca3af;cursor:not-allowed}
+/* arcade menu buttons — dark cabinet + neon outline (image's START GAME style) */
+.bigbtn.start{background:#0a0f0a;border:2px solid var(--green);color:var(--green);box-shadow:0 0 18px rgba(34,197,94,.35),inset 0 0 12px rgba(34,197,94,.15)} .bigbtn.start:hover{box-shadow:0 0 26px rgba(34,197,94,.55),inset 0 0 14px rgba(34,197,94,.22)}
+.bigbtn.sell{background:#140a0a;border:2px solid var(--red);color:#fca5a5;box-shadow:0 0 18px rgba(239,68,68,.30),inset 0 0 12px rgba(239,68,68,.12)} .bigbtn.sell:disabled{background:#374151;border-color:#4b5563;color:#9ca3af;box-shadow:none;cursor:not-allowed}
 .bigbtn:disabled{opacity:.6;cursor:not-allowed}
 a.bigbtn{display:flex;align-items:center;justify-content:center;text-decoration:none}
 .kbd{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg2);border:1px solid var(--line);border-bottom-width:2px;padding:2px 6px;border-radius:6px}
@@ -331,8 +356,8 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
 #screen-lobby>.lobby-bg{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;border-radius:var(--radius)}
 .lobby-bg .wash{position:absolute;inset:-35%;background:
   radial-gradient(620px 360px at 18% 12%,rgba(34,197,94,.16),transparent 62%),
-  radial-gradient(720px 420px at 86% 78%,rgba(245,158,11,.11),transparent 62%),
-  radial-gradient(520px 320px at 62% 6%,rgba(239,68,68,.08),transparent 60%);
+  radial-gradient(720px 420px at 86% 78%,rgba(168,85,247,.16),transparent 62%),
+  radial-gradient(520px 320px at 62% 6%,rgba(168,85,247,.10),transparent 60%);
   animation:lobbysway 16s ease-in-out infinite alternate}
 @keyframes lobbysway{from{transform:translate(-2.5%,-1.5%) scale(1)}to{transform:translate(2.5%,2%) scale(1.07)}}
 .lobby-bg .layer{position:absolute;left:0;right:0;top:-520px;bottom:0;background-repeat:repeat}
@@ -365,9 +390,11 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
 .menu-tile{display:flex;align-items:center;gap:14px;text-align:left;background:var(--card);border:1px solid var(--line2);border-radius:16px;padding:16px;cursor:pointer;font-family:inherit;color:var(--text);width:100%}
 .menu-tile:hover{border-color:var(--green)}
 /* lobby tiles green like the Join Game button */
-#screen-lobby .menu-tile{background:rgba(34,197,94,.62);border-color:rgba(255,255,255,.22);color:#041207;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
-#screen-lobby .menu-tile:hover{border-color:rgba(255,255,255,.35);filter:brightness(1.07)}
-#screen-lobby .menu-tile .td{color:rgba(4,18,7,.72)}
+#screen-lobby .menu-tile{background:rgba(10,10,22,.88);border:2px solid var(--purple);color:var(--purple-l);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);box-shadow:0 0 16px rgba(168,85,247,.25)}
+#screen-lobby .menu-tile:hover{border-color:var(--purple-l);box-shadow:0 0 24px rgba(168,85,247,.45)}
+#screen-lobby .menu-tile .td{color:rgba(216,180,254,.72)}
+#screen-lobby .menu-tile .tt{font-family:'Press Start 2P',monospace;font-size:12px;letter-spacing:0}
+#screen-lobby .menu-tile .tgo{color:var(--purple-l)}
 #screen-lobby .menu-tile .tgo{color:#041207}
 .menu-tile .tic{font-size:26px;line-height:1;flex:none}
 .menu-tile .tt{font-weight:700;font-size:16.5px;display:block}
@@ -449,7 +476,8 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <div class="sticker">PUMP IT!</div>
     </div>
     <div class="hero-copy">
-      <span class="pill-logo"><span style="position:relative;z-index:1">SolSwing</span></span>
+      <div class="theme-planet" aria-hidden="true"><span class="ring"></span><span class="dot d1"></span><span class="dot d2"></span></div>
+      <svg class="theme-title" viewBox="0 0 400 90" role="img" aria-label="SolSwing"><defs><path id="title-arc" d="M 20,75 Q 200,5 380,75" fill="none"/></defs><text><textPath href="#title-arc" startOffset="50%" text-anchor="middle">SOLSWING</textPath></text></svg>
       <p style="font-size:12.5px;color:var(--muted);margin:8px 0 0">The friendliest reflex game on Solana</p>
       <h1>Watch it pump.<br>Beat the rug.</h1>
       <p>Two players stake SOL. The chart pumps, then the dev rugs — first to sell wins the round. Win 2 rounds and take <b style="color:var(--text)">94% of the pot</b>. That's it!</p>
@@ -468,6 +496,7 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <button class="bigbtn start" id="btn-enter" style="margin-top:14px">Enter the Arena <span class="blink">▸</span></button>
     </div>
   </div>
+    <div class="theme-footer" aria-hidden="true"><span>🚀 1P</span><span class="pf">◆ INSERT COIN ◆</span><span>CREDIT 00</span></div>
   </section>
 
   <!-- PAGE 2 · LOBBY — one screen, no scrolling: Join Game on top, then the
@@ -487,16 +516,9 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
 })();
 </script>
 <script>
-// Site background: 90s-PC doge image, base64 parts in ios/ (same host as the game chunks)
-(function(){
-  var base='https://raw.githubusercontent.com/devsolswing/Solswing-server/main/ios/';
-  var parts=['doge-bg-b64-1.txt','doge-bg-b64-2.txt','doge-bg-b64-3.txt','doge-bg-b64-4.txt','doge-bg-b64-5.txt','doge-bg-b64-6.txt','doge-bg-b64-7.txt'];
-  Promise.all(parts.map(function(p){return fetch(base+p).then(function(r){return r.text();});})).then(function(c){
-    var st=document.createElement('style');
-    st.textContent='body::before{background-image:url("data:image/jpeg;base64,'+c.join('').replace(/\s/g,'')+'")!important}';
-    document.head.appendChild(st);
-  }).catch(function(){});
-})();
+// Site background: RETIRED — the 90s-PC doge image is no longer loaded. The
+// arcade space starfield (body::before in the stylesheet) is the theme now.
+// The doge-bg parts stay in the repo unused; nothing fetches them anymore.
 </script>
   <section class="screen" id="screen-lobby">
     <div class="lobby-bg" aria-hidden="true"><div class="wash"></div><div class="layer far"></div><div class="layer near"></div></div>
@@ -652,13 +674,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
     <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
     <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not real-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
     <details class="faq"><summary>How do I actually win?</summary><p>Pure reflexes. When the dev rugs, hit SELL (or press <span class="kbd">Space</span>) faster than your opponent. The server stamps your sell the moment it arrives — your own clock doesn't count — and sells later than 5 seconds after the rug don't count at all. Win 2 rounds to take the match.</p></details>
-    <details class="faq"><summary>Why does the winner get 94% and not 100%?</summary><p>The remaining 6% is the arena fee. It's fixed in the smart contract, goes to the SolSwing treasury wallet, and pays for the game server, on-chain settlement and development. It's taken from the pot at settlement — the winner's 94% is never touched afterwards.</p></details>
-    <details class="faq"><summary>What happens if I close the tab or switch apps mid-round?</summary><p>You forfeit. Anti-rage-quit is enforced by both the page and the server: hide the tab, disconnect or let the 5-second sell window lapse and the round — and, on a rage quit, the whole match pot — goes to your opponent.</p></details>
-    <details class="faq"><summary>Do I need a Phantom wallet to try it?</summary><p>Yes — SolSwing connects through Phantom only, and runs exclusively inside the Phantom app's built-in browser. Open Phantom, tap its browser icon, enter solswing.vercel.app, then tap Connect Wallet and approve in Phantom's native prompt — all without leaving the game. Devnet SOL is free play money, so wagering costs nothing real.</p></details>
-    <details class="faq"><summary>Can the other player cheat?</summary><p>Not from their browser. The rug timing, the sell timestamps and the winner are all decided by the game server, and the payout is executed by the on-chain program, which checks the winner and refuses double payouts. An edited client can change what it displays, but never the result.</p></details>
-    <details class="faq"><summary>Does it work on my phone?</summary><p>SolSwing plays inside the Phantom app's built-in browser on iPhone and Android. Open the Phantom app, tap the browser icon, and enter solswing.vercel.app — outside Phantom's browser the game shows an “Open in Phantom” prompt instead. Inside Phantom, Connect Wallet and every stake, settlement and refund signature happen natively in place: no app switching, no redirects. On mobile you tap SELL instead of pressing Space, and all five pages stack into a single thumb-friendly column.</p></details>
-  <!-- HOW IT WORKS -->
-  <div class="section">
-    <h2>Game-server based, not browser-trusted</h2>
-    <p class="lead">The original version decided everything in the browser — anyone could edit the rug time or fake a win. SolSwing flips that: the server is the referee, the Solana program is the vault.</p>
-    <div cla
+    <details class="faq"><summary>Why does the winner get 94% and not 100%?</summary><p>The remaining 6% is the arena fee. It's fixed in the smart contract, goes to the SolSwing treasury wallet, and pays for the game server, on-chain settlement and development. It's taken from the po

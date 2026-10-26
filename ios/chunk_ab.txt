@@ -1,4 +1,13 @@
-ss="flow">
+t at settlement — the winner's 94% is never touched afterwards.</p></details>
+    <details class="faq"><summary>What happens if I close the tab or switch apps mid-round?</summary><p>You forfeit. Anti-rage-quit is enforced by both the page and the server: hide the tab, disconnect or let the 5-second sell window lapse and the round — and, on a rage quit, the whole match pot — goes to your opponent.</p></details>
+    <details class="faq"><summary>Do I need a Phantom wallet to try it?</summary><p>Yes — SolSwing connects through Phantom only, and runs exclusively inside the Phantom app's built-in browser. Open Phantom, tap its browser icon, enter solswing.vercel.app, then tap Connect Wallet and approve in Phantom's native prompt — all without leaving the game. Devnet SOL is free play money, so wagering costs nothing real.</p></details>
+    <details class="faq"><summary>Can the other player cheat?</summary><p>Not from their browser. The rug timing, the sell timestamps and the winner are all decided by the game server, and the payout is executed by the on-chain program, which checks the winner and refuses double payouts. An edited client can change what it displays, but never the result.</p></details>
+    <details class="faq"><summary>Does it work on my phone?</summary><p>SolSwing plays inside the Phantom app's built-in browser on iPhone and Android. Open the Phantom app, tap the browser icon, and enter solswing.vercel.app — outside Phantom's browser the game shows an “Open in Phantom” prompt instead. Inside Phantom, Connect Wallet and every stake, settlement and refund signature happen natively in place: no app switching, no redirects. On mobile you tap SELL instead of pressing Space, and all five pages stack into a single thumb-friendly column.</p></details>
+  <!-- HOW IT WORKS -->
+  <div class="section">
+    <h2>Game-server based, not browser-trusted</h2>
+    <p class="lead">The original version decided everything in the browser — anyone could edit the rug time or fake a win. SolSwing flips that: the server is the referee, the Solana program is the vault.</p>
+    <div class="flow">
       <div class="flow-step"><i>STEP 1 · ESCROW</i><h3>Both players stake</h3><p><span class="mono">initialize_match</span> (P1) + <span class="mono">join_match</span> (P2) lock equal wagers into a PDA vault. Two-phase, so nobody has to co-sign someone else's transaction.</p></div>
       <div class="flow-step"><i>STEP 2 · SERVER ROUND</i><h3>Server picks the rug</h3><p>The Node server picks a secret rug moment, streams <span class="mono">tick</span> messages to both clients, then broadcasts <span class="mono">rug</span>. Clients learn it at the same instant the server stamps it.</p></div>
       <div class="flow-step"><i>STEP 3 · REFLEX RACE</i><h3>Fastest sell wins</h3><p>Server timestamps sell messages on arrival — client timestamps are ignored. Late sells (&gt;5s), double sells, disconnects and hidden-tab forfeits are all handled server-side.</p></div>
@@ -857,25 +866,3 @@ async function chainDoSettle(){
   if(!treasuryLockOk()){ setMmSettle('⛔ Treasury lock check failed — settlement refused.'); return; }
   chain.settleBusy=true;
   setMmSettle('⏳ Settling on-chain — approve in Phantom…');
-  try{
-    var sig=await phantomSend([buildSettleIx(ps.winnerId, ps.accounts)]);
-    chain.settleSig=sig; chain.lastTx=sig; chain.pendingSettle=null;
-    setMmSettle('✓ Settled on-chain · <a href="'+explorerTx(sig)+'" target="_blank" rel="noopener">tx '+shortSig(sig)+' ↗</a>');
-    log('[chain] settle_match confirmed · winner paid 94% · treasury fee 6% · tx '+shortSig(sig),'winlog');
-    refreshBalance().then(updateFaucetNote);
-  }catch(e){
-    setMmSettle('⚠ Settlement not signed — tap here to retry.');
-    log('[chain] settle_match not completed · the pot stays locked in the vault until settled','ruglog');
-  }
-  chain.settleBusy=false;
-}
-var wins=0, losses=0, level=1, roundNo=1;
-var active=false, rugged=false, tickTimer=null, rugTimer=null, botTimer=null, resolveTimer=null;
-var startAt=0, rugAt=0, rugStamp=0, youMs=null, botMs=null;
-var matchBestMs=null; // fastest reflex this match (bot mode) — merged into the stats record at match end
-var matchEndTimer=null; // legacy post-match handle — match end is now instant (disconnectSession), this stays cleared
-var telMatch={you:[],opp:[]}, roundTel=null, oppSnap=false, oppSnapMs=30; // per-round input timing records + opponent pace profile
-
-function wager(){ return Math.max(0.01, parseFloat($('wager').value)||0.1); }
-// The wager selector locks the moment a stake flow begins (pre-game or
-// matchmaking countdown, queue, signing) a

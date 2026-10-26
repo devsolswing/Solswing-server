@@ -1,4 +1,17 @@
-tion tick(){
+D';
+  $('mm-opp-name').textContent='🔴 '+oppName;
+  $('mm-opp-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
+  $('mm-pot').textContent=fmt(mmWager*2)+' SOL';
+  $('mm-note').textContent='Both bets are locked in the pot. Round 1 starts at zero.';
+  $('mm-disconnect').classList.remove('hidden');
+  ov.classList.add('open');
+  mmDeadline=Date.now()+5000;
+  // Simulated line drop: occasionally the opponent's connection dies mid-
+  // countdown (production: the server's opponent_left message) — handled by
+  // opponentDropped(), which cancels and returns YOU to the lobby.
+  mmOppDropAt=(Math.random()<0.15) ? Date.now()+1600+Math.random()*2200 : 0;
+  var numEl=$('mm-num'); numEl.style.color='';
+  function tick(){
     if(!mmActive) return;
     if(!$('screen-game').classList.contains('active')||!walletConnected){ cleanupMatchmaking(); $('btn-start').classList.remove('hidden'); log('[matchmaking] countdown cancelled — player left · wager refunded','ruglog'); return; } // you disconnected mid-countdown
     if(mmOppDropAt && Date.now()>=mmOppDropAt){ opponentDropped(); return; }
