@@ -1,3 +1,8 @@
+.settleSig || chain.settleBusy) return;
+  if(!realMode()){ setMmSettle('⚠ Connect your wallet to sign the settlement — the pot stays locked on-chain until you do.'); return; }
+  if(!treasuryLockOk()){ setMmSettle('⛔ Treasury lock check failed — settlement refused.'); return; }
+  chain.settleBusy=true;
+  setMmSettle('⏳ Settling on-chain — approve in Phantom…');
   try{
     var sig=await phantomSend([buildSettleIx(ps.winnerId, ps.accounts)]);
     chain.settleSig=sig; chain.lastTx=sig; chain.pendingSettle=null;
@@ -912,9 +917,4 @@ function opponentJoins(){
   var lbl=$('chart-score-label'); if(lbl) lbl.textContent='Match score · You – '+oppName;
   setStatus('⚔️ '+oppName+' joined — both bets locked!');
   log('[matchmaking] opponent found: '+oppName+' · their '+fmt(mmWager)+' SOL locked · pot '+fmt(mmWager*2)+' SOL','winlog');
-  showMmCountdown(); // both bets locked → the 5s matchmaking countdown
-}
-function showMmCountdown(){
-  var ov=$('mm-countdown'); if(!ov) return;
-  mmActive=true;
-  $('mm-you-bet').textContent=fmt(mmWager)+' SOL · LOCKE
+  showMmCountdown(); // both bets 

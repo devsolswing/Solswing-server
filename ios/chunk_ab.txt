@@ -1,4 +1,5 @@
-t at settlement — the winner's 94% is never touched afterwards.</p></details>
+rugs, hit SELL (or press <span class="kbd">Space</span>) faster than your opponent. The server stamps your sell the moment it arrives — your own clock doesn't count — and sells later than 5 seconds after the rug don't count at all. Win 2 rounds to take the match.</p></details>
+    <details class="faq"><summary>Why does the winner get 94% and not 100%?</summary><p>The remaining 6% is the arena fee. It's fixed in the smart contract, goes to the SolSwing treasury wallet, and pays for the game server, on-chain settlement and development. It's taken from the pot at settlement — the winner's 94% is never touched afterwards.</p></details>
     <details class="faq"><summary>What happens if I close the tab or switch apps mid-round?</summary><p>You forfeit. Anti-rage-quit is enforced by both the page and the server: hide the tab, disconnect or let the 5-second sell window lapse and the round — and, on a rage quit, the whole match pot — goes to your opponent.</p></details>
     <details class="faq"><summary>Do I need a Phantom wallet to try it?</summary><p>Yes — SolSwing connects through Phantom only, and runs exclusively inside the Phantom app's built-in browser. Open Phantom, tap its browser icon, enter solswing.vercel.app, then tap Connect Wallet and approve in Phantom's native prompt — all without leaving the game. Devnet SOL is free play money, so wagering costs nothing real.</p></details>
     <details class="faq"><summary>Can the other player cheat?</summary><p>Not from their browser. The rug timing, the sell timestamps and the winner are all decided by the game server, and the payout is executed by the on-chain program, which checks the winner and refuses double payouts. An edited client can change what it displays, but never the result.</p></details>
@@ -861,8 +862,4 @@ function setMmSettle(html){ var el=$('mm-settle'); if(el) el.innerHTML=html; }
 // pays 94% to the winner and 6% to the locked treasury. Retry by tapping
 // the Settlement row in the match popup if the signature was declined.
 async function chainDoSettle(){
-  var ps=chain.pendingSettle; if(!ps || chain.settleSig || chain.settleBusy) return;
-  if(!realMode()){ setMmSettle('⚠ Connect your wallet to sign the settlement — the pot stays locked on-chain until you do.'); return; }
-  if(!treasuryLockOk()){ setMmSettle('⛔ Treasury lock check failed — settlement refused.'); return; }
-  chain.settleBusy=true;
-  setMmSettle('⏳ Settling on-chain — approve in Phantom…');
+  var ps=chain.pendingSettle; if(!ps || chain
