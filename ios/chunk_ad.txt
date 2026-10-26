@@ -1,9 +1,4 @@
-locked → the 5s matchmaking countdown
-}
-function showMmCountdown(){
-  var ov=$('mm-countdown'); if(!ov) return;
-  mmActive=true;
-  $('mm-you-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
+mWager)+' SOL · LOCKED';
   $('mm-opp-name').textContent='🔴 '+oppName;
   $('mm-opp-bet').textContent=fmt(mmWager)+' SOL · LOCKED';
   $('mm-pot').textContent=fmt(mmWager*2)+' SOL';
