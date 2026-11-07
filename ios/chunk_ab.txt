@@ -1,4 +1,5 @@
-al-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
+font-size:18px">FAQ</h3>
+    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not real-world money — this page plays on Solana devnet, where SOL is free play money with no cash value. But with a Phantom wallet connected the wagering itself is genuinely on-chain: queuing a match sends a real <span class="mono">initialize_match</span> transaction that escrows your devnet SOL into the deployed SolSwing program, and the match settles 94/6 on-chain at the end — every signature links to the Solana Explorer so you can verify it yourself. Mainnet wagering would need the production game server (<span class="mono">server.js</span>) as referee, and only ever happens on a network you choose.</p></details>
     <details class="faq"><summary>How do I actually win?</summary><p>Pure reflexes. When the dev rugs, hit SELL (or press <span class="kbd">Space</span>) faster than your opponent. The server stamps your sell the moment it arrives — your own clock doesn't count — and sells later than 5 seconds after the rug don't count at all. Win 2 rounds to take the match.</p></details>
     <details class="faq"><summary>Why does the winner get 94% and not 100%?</summary><p>The remaining 6% is the arena fee. It's fixed in the smart contract, goes to the SolSwing treasury wallet, and pays for the game server, on-chain settlement and development. It's taken from the pot at settlement — the winner's 94% is never touched afterwards.</p></details>
     <details class="faq"><summary>What happens if I close the tab or switch apps mid-round?</summary><p>You forfeit. Anti-rage-quit is enforced by both the page and the server: hide the tab, disconnect or let the 5-second sell window lapse and the round — and, on a rage quit, the whole match pot — goes to your opponent.</p></details>
@@ -628,18 +629,22 @@ window.addEventListener('load', function(){
 // The demo wallet never touches this module: its play stays simulated.
 // ═══════════════════════════════════════════════════════════════════════
 var PROGRAM_ID_STR='5FsF1wcWfEtKExdHHqCRLayvPkkz775RErx5vWmtPACp';
-// Helius devnet RPC — paste the Helius API key between the quotes to route
-// all chain traffic through Helius; while empty, the same devnet cluster is
-// reached via the public RPC below (identical chain, identical program).
-var HELIUS_API_KEY='';
-var RPC_URL=HELIUS_API_KEY ? ('https://devnet.helius-rpc.com/?api-key='+HELIUS_API_KEY) : 'https://api.devnet.solana.com';
+// House bot wallet — PUBKEY ONLY. The bot secret lives on the game server
+// (BOT_KEYPAIR env var) and the server signs join_match via POST /bot-join.
+// No private key may ever be embedded in this page again.
+var BOT_PUBKEY='Bc7CCunk9qsBbpXS6wEmLqnDqQ9e1czYbt3DUrUGSDmW';
+function botPubkey(){ return new solanaWeb3.PublicKey(BOT_PUBKEY); }
+// Devnet RPC — public endpoint only. (An API key used to be embedded
+// here; it was removed together with the house bot secret: no credentials
+// live in this page any more.)
+var RPC_URL='https://api.devnet.solana.com';
 var PUBLIC_DEVNET_RPC='https://api.devnet.solana.com'; // faucet/airdrop fallback for the house opponent
 var FAUCET_URL='https://faucet.solana.com';
 // Anchor instruction discriminators = sha256("global:<name>")[0..8]
 var DISC={ initialize_match:[156,133,52,179,176,29,64,124], join_match:[244,8,47,130,192,59,179,44], cancel_match:[142,136,247,45,92,112,180,83], settle_match:[71,124,117,96,191,217,116,24] };
 var chain={ conn:null, playerKey:null, balanceLamports:null,
   matchId:null, matchState:null, vault:null,
-  botKey:null, botReady:null,
+  botReady:null,
   escrowSig:null, joinSig:null, settleSig:null, cancelSig:null,
   joined:false, cancelBusy:false, settleBusy:false, pendingSettle:null, lastTx:null };
 function web3ok(){ return typeof window!=='undefined' && !!window.solanaWeb3; }
@@ -694,43 +699,28 @@ async function phantomSend(ixs){
   }
   return sig;
 }
-async function botSend(ixs){
-  var conn=chainConn();
-  var tx=new solanaWeb3.Transaction(); ixs.forEach(function(ix){ tx.add(ix); });
-  tx.feePayer=chain.botKey.publicKey;
-  var bh=await conn.getLatestBlockhash('confirmed');
-  tx.recentBlockhash=bh.blockhash; tx.lastValidBlockHeight=bh.lastValidBlockHeight;
-  tx.sign(chain.botKey);
-  var sig=await conn.sendRawTransaction(tx.serialize());
-  await conn.confirmTransaction({ signature:sig, blockhash:bh.blockhash, lastValidBlockHeight:bh.lastValidBlockHeight }, 'confirmed');
-  return sig;
-}
 // House bot wallet — pre-funded with devnet SOL, no faucet needed.
 // Wagers come directly from this wallet. (Devnet only — small amounts.)
-var HOUSE_BOT_SECRET=[75,86,199,4,254,220,97,62,69,140,30,100,160,248,47,25,111,228,195,133,113,234,51,29,210,29,136,65,53,26,221,42,157,147,51,67,145,254,222,229,167,228,31,42,205,252,241,232,50,148,45,40,112,29,106,228,109,93,13,171,48,19,251,61];
-function ensureBot(){
-  if(chain.botKey) return chain.botKey;
-  chain.botKey=solanaWeb3.Keypair.fromSecretKey(new Uint8Array(HOUSE_BOT_SECRET));
-  return chain.botKey;
-}
+// The bot secret is NOT in this page: the server signs the bot's
+// join_match (POST /bot-join). Only the bot pubkey lives here.
 // Fund the house opponent's stake with FREE devnet SOL (public faucet
-// airdrop into its in-page wallet). Player funds are never used for this.
+// airdrop into the bot wallet). Player funds are never used for this.
 async function fundBot(needLamports){
-  var conn=chainConn(); var bot=ensureBot();
-  var bal=await conn.getBalance(bot.publicKey);
+  var conn=chainConn(); var botPub=botPubkey();
+  var bal=await conn.getBalance(botPub);
   if(bal>=needLamports) return true;
   var amt=(needLamports-bal)+20000000; // shortfall + 0.02 SOL fee buffer
   // Retry up to 3 times with delays - faucet is often rate-limited on first try
   for(var attempt=0; attempt<3; attempt++){
     try{
-      var sig=await conn.requestAirdrop(bot.publicKey, amt);
+      var sig=await conn.requestAirdrop(botPub, amt);
       await conn.confirmTransaction(sig,'confirmed');
       bal=await conn.getBalance(bot.publicKey);
       if(bal>=needLamports) return true;
     }catch(e){
       try{
         var pub=new solanaWeb3.Connection(PUBLIC_DEVNET_RPC,'confirmed');
-        var sig2=await pub.requestAirdrop(bot.publicKey, amt);
+        var sig2=await pub.requestAirdrop(botPub, amt);
         await pub.confirmTransaction(sig2,'confirmed');
         bal=await conn.getBalance(bot.publicKey);
         if(bal>=needLamports) return true;
@@ -792,24 +782,23 @@ async function chainStake(wagerSol){
   return sig;
 }
 // join_match — the house opponent stakes the same wager, for real.
+// Signed SERVER-SIDE (POST /bot-join): the bot secret never lives in this
+// page any more — Phantom flagged the embedded secret as malicious. The
+// server first verifies the player's stake is on-chain, then escrows the
+// bot's matching wager.
 async function chainBotJoin(wagerSol){
   if(chain.joined) return chain.joinSig;
   var lamports=Math.round(wagerSol*1e9);
   var ok=false;
   try{ ok=await fundBot(lamports+100000); }catch(e){ ok=false; }
   if(!ok) throw new Error('opponent stake could not be funded (devnet faucet unreachable / rate-limited)');
-  var pid=new solanaWeb3.PublicKey(PROGRAM_ID_STR);
-  var ix=new solanaWeb3.TransactionInstruction({
-    programId:pid,
-    keys:[
-      { pubkey:chain.matchState, isSigner:false, isWritable:true },
-      { pubkey:chain.vault, isSigner:false, isWritable:true },
-      { pubkey:chain.botKey.publicKey, isSigner:true, isWritable:true },
-      { pubkey:solanaWeb3.SystemProgram.programId, isSigner:false, isWritable:false }
-    ],
-    data:ixData(DISC.join_match, [u64le(chain.matchId)])
-  });
-  var sig=await botSend([ix]);
+  var resp;
+  try{
+    resp=await fetch('https://solswing-server-production.up.railway.app/bot-join',{ method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ matchId:chain.matchId.toString(), wagerSol:wagerSol }) });
+  }catch(e){ throw new Error('bot-join request failed (server unreachable): '+e.message); }
+  var data=null; try{ data=await resp.json(); }catch(e){}
+  if(!resp.ok || !data || !data.ok) throw new Error('bot join failed: '+((data&&data.error)||('server error '+resp.status)));
+  var sig=data.signature;
   chain.joined=true; chain.joinSig=sig; chain.lastTx=sig;
   log('[chain] join_match confirmed · opponent stake locked · pot '+fmt(wagerSol*2)+' SOL · tx '+shortSig(sig),'winlog');
   return sig;
@@ -845,11 +834,15 @@ function buildSettleIx(winnerId, ctx){
   // match has started still settles the match it actually belongs to.
   var ms=(ctx&&ctx.matchState)?new solanaWeb3.PublicKey(ctx.matchState):chain.matchState;
   var v=(ctx&&ctx.vault)?new solanaWeb3.PublicKey(ctx.vault):chain.vault;
-  var winnerKey=(ctx&&ctx.winnerKey)?new solanaWeb3.PublicKey(ctx.winnerKey):((winnerId===1) ? chain.playerKey : chain.botKey.publicKey);
+  var winnerKey=(ctx&&ctx.winnerKey)?new solanaWeb3.PublicKey(ctx.winnerKey):((winnerId===1) ? chain.playerKey : botPubkey());
   var feeKey=new solanaWeb3.PublicKey(TREASURY_PUBKEY); // the program's locked fee receiver — account key only, never displayed
   return new solanaWeb3.TransactionInstruction({
     programId:pid,
     keys:[
       { pubkey:ms, isSigner:false, isWritable:true },
       { pubkey:v, isSigner:false, isWritable:true },
-      { pubkey:winnerKey, isSigner:false, isWritable:true 
+      { pubkey:winnerKey, isSigner:false, isWritable:true },
+      { pubkey:feeKey, isSigner:false, isWritable:true },
+      { pubkey:chain.playerKey, isSigner:true, isWritable:false } // adjudicator signs
+    ],
+    data:ixData(DISC.settle_ma

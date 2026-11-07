@@ -1,8 +1,4 @@
-},
-      { pubkey:feeKey, isSigner:false, isWritable:true },
-      { pubkey:chain.playerKey, isSigner:true, isWritable:false } // adjudicator signs
-    ],
-    data:ixData(DISC.settle_match, [new Uint8Array([winnerId])])
+tch, [new Uint8Array([winnerId])])
   });
 }
 function setMmSettle(html){ var el=$('mm-settle'); if(el) el.innerHTML=html; }
@@ -579,7 +575,7 @@ function startPregameCountdown(){
   var ov=$('pregame-countdown'); if(!ov||pregameActive) return;
   pregameActive=true;
   oppName='Swing Bot'; oppShort='Bot'; oppSnap=false; // bot matches always face the Swing Bot
-  if(realMode()){ ensureBot(); chain.botReady=fundBot(Math.round(wager()*1e9)+100000).catch(function(){ return false; }); } // house wallet pre-funded; faucet only as backup
+  if(realMode()){ chain.botReady=fundBot(Math.round(wager()*1e9)+100000).catch(function(){ return false; }); } // house wallet pre-funded; faucet only as backup
   var clbl=$('chart-score-label'); if(clbl) clbl.textContent='Match score · You – Bot';
   $('btn-start').classList.add('hidden'); // no double-queue while the countdown runs
   lockWager(true); // the amount on this countdown is the amount that gets staked — the selector locks with it
@@ -926,4 +922,5 @@ function opponentJoins(){
   $('btn-cancel-queue').classList.add('hidden');
   oppName=PVP_NAMES[Math.floor(Math.random()*PVP_NAMES.length)]; oppShort=oppName;
   oppSnap=(Math.random()<0.15); oppSnapMs=26+Math.random()*14;
-  var lbl=$('cha
+  var lbl=$('chart-score-label'); if(lbl) lbl.textContent='Match score · You – '+oppName;
+  setStat

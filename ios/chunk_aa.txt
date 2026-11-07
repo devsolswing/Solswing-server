@@ -695,5 +695,4 @@ details.faq p{color:var(--muted);line-height:1.6;margin:10px 0 2px;font-size:14.
       <p style="color:var(--muted);font-size:13.5px;line-height:1.55;margin:10px 0 0">Before any mainnet launch: verify the program ID and treasury address in the contract, start with tiny wagers, and only ever connect a wallet inside the official Phantom app's built-in browser — never through a link someone drops in chat.</p>
     </div>
 
-    <h3 id="faq-head" style="margin:20px 0 10px;font-size:18px">FAQ</h3>
-    <details class="faq"><summary>Is SolSwing played for real money?</summary><p>Not re
+    <h3 id="faq-head" style="margin:20px 0 10px;

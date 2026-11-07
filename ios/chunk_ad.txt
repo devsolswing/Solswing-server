@@ -1,5 +1,4 @@
-rt-score-label'); if(lbl) lbl.textContent='Match score · You – '+oppName;
-  setStatus('⚔️ '+oppName+' joined — both bets locked!');
+us('⚔️ '+oppName+' joined — both bets locked!');
   log('[matchmaking] opponent found: '+oppName+' · their '+fmt(mmWager)+' SOL locked · pot '+fmt(mmWager*2)+' SOL','winlog');
   showMmCountdown(); // both bets locked → the 5s matchmaking countdown
 }
@@ -229,7 +228,7 @@ function endMatch(won, note){
   if(settleOwed){
     // summary rides along so a settle retried later rebuilds this exact
     // result popup.
-    var winKey=(settle.winner==='you') ? chain.playerKey : (chain.botKey&&chain.botKey.publicKey);
+    var winKey=(settle.winner==='you') ? chain.playerKey : botPubkey();
     chain.pendingSettle={ winnerId:(settle.winner==='you'?1:2),
       accounts:{ matchState:chain.matchState?chain.matchState.toString():null, vault:chain.vault?chain.vault.toString():null, winnerKey:winKey?winKey.toString():null },
       summary:{ won:won, pnl:pnl, wagered:w, payout:payout, score:finalScore, note:note||'', voided:false, mode:matchMode } };
