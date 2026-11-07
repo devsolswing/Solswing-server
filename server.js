@@ -21,6 +21,8 @@
  *   SOLANA_RPC=https://api.devnet.solana.com
  *   PROGRAM_ID=<your deployed SolSwing program id>
  *   TREASURY_PUBKEY=GyBLDTX9AVdyd3oJWBedcQ6wSgBUKjGHhYFGSDu9NgMS
+ *   BOT_KEYPAIR=<house bot keypair JSON array — Railway Variables only, never in code or the repo>
+ *   BOT_KEYPAIR_PATH=~/.config/solana/bot.json
  *   PORT=8080
  */
 
@@ -104,6 +106,36 @@ if (PROGRAM_ID && (adjudicatorKeypairEnv || adjudicatorKeypairPath)) {
     }
 } else {
     console.warn('[solana] disabled — set PROGRAM_ID and ADJUDICATOR_KEYPAIR (or ADJUDICATOR_KEYPAIR_PATH) to enable on-chain settlement.');
+}
+
+// ---------------------------------------------------------------------------
+// House bot keypair (server-side only)
+// ---------------------------------------------------------------------------
+// The house bot's join_match is signed HERE, never in the game page:
+// embedding the bot secret in client JavaScript made Phantom flag the site
+// as malicious. BOT_KEYPAIR is a JSON array in an env variable (Railway
+// Variables, set by the operator — never in code, chat, or the repo), or a
+// keypair file via BOT_KEYPAIR_PATH. Without it, POST /bot-join answers
+// 503 and bot matches are disabled; the bot pubkey is logged, never any
+// key material.
+let botKeypair = null;
+if (PROGRAM_ID && (process.env.BOT_KEYPAIR || process.env.BOT_KEYPAIR_PATH)) {
+    try {
+        const { Keypair } = require('@solana/web3.js');
+        let botSecret;
+        if (process.env.BOT_KEYPAIR) {
+            botSecret = Uint8Array.from(JSON.parse(process.env.BOT_KEYPAIR));
+        } else {
+            const bpPath = process.env.BOT_KEYPAIR_PATH.replace('~', os.homedir());
+            botSecret = Uint8Array.from(JSON.parse(fs.readFileSync(bpPath, 'utf8')));
+        }
+        botKeypair = Keypair.fromSecretKey(botSecret);
+        console.log('[bot] bot-join enabled. Bot wallet:', botKeypair.publicKey.toBase58());
+    } catch (e) {
+        console.warn('[bot] bot-join disabled —', e.message);
+    }
+} else {
+    console.warn('[bot] bot-join disabled — set BOT_KEYPAIR (or BOT_KEYPAIR_PATH) to enable house-bot joins.');
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +528,51 @@ app.post('/leaderboard/report', express.json(), (req, res) => {
         lbSave();
         return res.json({ ok:true });
     } catch(e) { return res.status(400).json({ ok:false }); }
+});
+// ---- POST /bot-join: the house bot joins a staked match (server-signed) ----
+// The client used to sign join_match in the page with the bot secret embedded
+// in its JavaScript — Phantom's scanner flagged that as malicious. The secret
+// now lives only here (BOT_KEYPAIR env var). The client stakes first via
+// Phantom (initialize_match), then calls this endpoint; we verify the stake
+// is really on-chain (match-state exists, vault holds >= the wager) before
+// the bot escrows the same wager. Rate-limited to 10 joins/minute across
+// the endpoint; the on-chain program itself rejects already-joined matches.
+const BOT_JOIN_WINDOW_MS = 60000;
+const BOT_JOIN_MAX_PER_WINDOW = 10;
+const botJoinTimestamps = [];
+app.post('/bot-join', express.json(), async (req, res) => {
+    try {
+        if (!botKeypair) return res.status(503).json({ ok: false, error: 'bot_key_not_configured' });
+        if (!solana || !solana.program) return res.status(503).json({ ok: false, error: 'wagering_not_configured' });
+        const now = Date.now();
+        while (botJoinTimestamps.length && botJoinTimestamps[0] <= now - BOT_JOIN_WINDOW_MS) botJoinTimestamps.shift();
+        if (botJoinTimestamps.length >= BOT_JOIN_MAX_PER_WINDOW) return res.status(429).json({ ok: false, error: 'rate_limited' });
+        botJoinTimestamps.push(now);
+        const { matchId, wagerSol } = req.body || {};
+        if (typeof matchId !== 'string' || !/^\d+$/.test(matchId)) return res.status(400).json({ ok: false, error: 'invalid_match_id' });
+        let matchIdBig;
+        try { matchIdBig = BigInt(matchId); } catch (e) { return res.status(400).json({ ok: false, error: 'invalid_match_id' }); }
+        if (matchIdBig >= (1n << 64n)) return res.status(400).json({ ok: false, error: 'invalid_match_id' });
+        if (typeof wagerSol !== 'number' || !Number.isFinite(wagerSol) || wagerSol < MIN_WAGER_SOL || wagerSol > MAX_WAGER_SOL) return res.status(400).json({ ok: false, error: 'invalid_wager' });
+        const { connection, PublicKey, anchor } = solana;
+        const matchIdBuf = Buffer.from(new anchor.BN(matchIdBig.toString()).toArray('le', 8));
+        const programId = new PublicKey(PROGRAM_ID);
+        const [matchState] = PublicKey.findProgramAddressSync([Buffer.from('match-state'), matchIdBuf], programId);
+        const [vault] = PublicKey.findProgramAddressSync([Buffer.from('vault'), matchIdBuf], programId);
+        const stateInfo = await connection.getAccountInfo(matchState);
+        const vaultBalance = stateInfo ? await connection.getBalance(vault) : 0;
+        if (!stateInfo || vaultBalance < Math.round(wagerSol * 1e9)) return res.status(409).json({ ok: false, error: 'stake_not_found' });
+        const signature = await solana.program.methods
+            .joinMatch(new anchor.BN(matchIdBig.toString()))
+            .accounts({ matchState, vault, playerTwo: botKeypair.publicKey })
+            .signers([botKeypair])
+            .rpc();
+        console.log(`[bot-join] match ${matchId} joined · ${signature}`);
+        return res.json({ ok: true, signature });
+    } catch (e) {
+        console.error('[bot-join] error:', e.message);
+        return res.status(409).json({ ok: false, error: 'join_failed' });
+    }
 });
 const wss = new WebSocket.Server({ server });
 
